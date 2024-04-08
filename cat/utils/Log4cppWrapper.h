@@ -27,6 +27,7 @@ using LoggerMap = map<LogId, Category&>;
 class Object
 {
 public:
+    Object() = delete;
     static void init(initializer_list<LogAttr> _list, const string& path);
     static Category& getLogger(LogId);
 private:

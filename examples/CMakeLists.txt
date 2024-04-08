@@ -34,3 +34,12 @@ yamlcpp_wrapper_example1.cpp
 target_link_libraries(yamlcpp_wrapper_example1
 cat_utils
 )
+
+##################################################
+add_executable(redis_wrapper_example1
+redis_wrapper_example1.cpp
+)
+
+target_link_libraries(redis_wrapper_example1
+cat_utils
+)

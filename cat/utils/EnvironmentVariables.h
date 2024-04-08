@@ -17,6 +17,7 @@ using EnvironmentMap = map<EnvironmentKey, EnvironmentValue>;
 class Object
 {
 public:
+    Object() = delete;
     static void init(initializer_list<string> _list);
     static EnvironmentMap& getEnvironmentMap(){ return environmentMap_; }
 private:

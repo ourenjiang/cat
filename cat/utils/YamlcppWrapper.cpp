@@ -1,5 +1,6 @@
 #include "YamlcppWrapper.h"
 #include <iostream>
+#include "RedisWrapper.h"
 using namespace yamlcpp_wrapper;
 
 YAML::Node Object::root_;
@@ -14,4 +15,3 @@ void Object::init(const string& filename)
         throw e;// 不处理
     }
 }
-

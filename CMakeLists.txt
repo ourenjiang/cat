@@ -41,6 +41,18 @@ set(BOOST_PATH $ENV{HOME}/devtools/boost-1.84.0)
 include_directories(${BOOST_PATH}/include)
 link_directories(${BOOST_PATH}/lib)
 
+# hiredis-1.2.0
+set(HIREDIS_PATH $ENV{HOME}/devtools/hiredis-1.2.0)
+include_directories(${HIREDIS_PATH}/include)
+link_directories(${HIREDIS_PATH}/lib)
+
+# 注意，此版本在通过cmake间接链接hiredis时，无法自动关联它的运行时路径，暂时还找不到解决办法
+# 一种临时手段时，使用它的静态库。即执行target_link_library时，使用redis++.a
+# redis-plus-plus-1.3.11
+set(REDIS_PLUS_PLUS_PATH $ENV{HOME}/devtools/redis-plus-plus-1.3.11)
+include_directories(${REDIS_PLUS_PLUS_PATH}/include)
+link_directories(${REDIS_PLUS_PLUS_PATH}/lib)
+
 add_subdirectory(cat)
 add_subdirectory(tests)
 add_subdirectory(examples)

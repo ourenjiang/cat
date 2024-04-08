@@ -3,6 +3,7 @@ Log4cppWrapper.cpp
 YamlcppWrapper.cpp
 CommandlineParams.cpp
 EnvironmentVariables.cpp
+RedisWrapper.cpp
 )
 
 add_library(cat_utils
@@ -14,4 +15,6 @@ target_link_libraries(cat_utils
 yaml-cpp.a
 log4cpp.a
 boost_program_options.a
+redis++.a
+hiredis.a
 )
