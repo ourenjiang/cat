@@ -7,7 +7,7 @@
 #include <log4cpp/Category.hh>
 #include <log4cpp/Priority.hh>
 #include <tuple>
-#include <initializer_list>
+#include <vector>
 
 namespace log4cpp_wrapper
 {
@@ -28,10 +28,10 @@ class Object
 {
 public:
     Object() = delete;
-    static void init(initializer_list<LogAttr> _list, const string& path);
+    static void init(vector<LogAttr> _list, const string& path);
     static Category& getLogger(LogId);
 private:
-    static Category& init(initializer_list<LogAttr>::const_iterator itr);
+    static Category& init(vector<LogAttr>::const_iterator itr);
     static LoggerMap loggerMap_;
     static string path_;
 };

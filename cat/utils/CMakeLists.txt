@@ -4,6 +4,7 @@ YamlcppWrapper.cpp
 CommandlineParams.cpp
 EnvironmentVariables.cpp
 RedisWrapper.cpp
+ZmqWrapper.cpp
 )
 
 add_library(cat_utils
@@ -17,4 +18,5 @@ log4cpp.a
 boost_program_options.a
 redis++.a
 hiredis.a
+zmq.a
 )

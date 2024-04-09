@@ -4,7 +4,7 @@ using namespace log4cpp_wrapper;
 LoggerMap Object::loggerMap_;
 string Object::path_;
 
-void Object::init(initializer_list<LogAttr> _list, const string& path)
+void Object::init(vector<LogAttr> _list, const string& path)
 {
     path_ = path;// 日志文件路径
 
@@ -15,7 +15,7 @@ void Object::init(initializer_list<LogAttr> _list, const string& path)
     }
 }
 
-Category& Object::init(initializer_list<LogAttr>::const_iterator itr)
+Category& Object::init(vector<LogAttr>::const_iterator itr)
 {
     auto logName = std::get<0>(*itr);// 日志名称
 

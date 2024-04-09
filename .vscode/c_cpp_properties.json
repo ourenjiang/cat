@@ -8,7 +8,10 @@
                 "${HOME}/devtools/log4cpp-1.1.3/include",
                 "${HOME}/devtools/boost-1.84.0/include",
                 "${HOME}/devtools/hiredis-1.2.0/include",
-                "${HOME}/devtools/redis-plus-plus-1.3.11/include"
+                "${HOME}/devtools/redis-plus-plus-1.3.11/include",
+                "${HOME}/devtools/libzmq-4.3.5/include",
+                "${HOME}/devtools/cppzmq-4.10.0/include",
+
             ],
             "defines": [],
             "compilerPath": "/usr/bin/gcc",

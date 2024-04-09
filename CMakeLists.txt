@@ -46,6 +46,15 @@ set(HIREDIS_PATH $ENV{HOME}/devtools/hiredis-1.2.0)
 include_directories(${HIREDIS_PATH}/include)
 link_directories(${HIREDIS_PATH}/lib)
 
+# libzmq-4.3.5
+set(LIBZMQ_PATH $ENV{HOME}/devtools/libzmq-4.3.5)
+include_directories(${LIBZMQ_PATH}/include)
+link_directories(${LIBZMQ_PATH}/lib)
+
+# cppzmq-4.10.0
+set(CPPZMQ_PATH $ENV{HOME}/devtools/cppzmq-4.10.0)
+include_directories(${CPPZMQ_PATH}/include)
+
 # 注意，此版本在通过cmake间接链接hiredis时，无法自动关联它的运行时路径，暂时还找不到解决办法
 # 一种临时手段时，使用它的静态库。即执行target_link_library时，使用redis++.a
 # redis-plus-plus-1.3.11
