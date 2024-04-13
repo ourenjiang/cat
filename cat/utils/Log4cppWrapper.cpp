@@ -1,53 +1,72 @@
 #include "Log4cppWrapper.h"
+#include <algorithm>
+#include <assert.h>
+using namespace std;
 using namespace log4cpp_wrapper;
 
-LoggerMap Object::loggerMap_;
+Priority::PriorityLevel log4cpp_wrapper::convertPriorityLevelFromString(const string& level)
+{
+    if(level == "FATAL")  return Priority::FATAL;
+    if(level == "ALERT")  return Priority::ALERT;
+    if(level == "CRIT")   return Priority::CRIT;
+    if(level == "ERROR")  return Priority::ERROR;
+    if(level == "WARN")   return Priority::WARN;
+    if(level == "NOTICE") return Priority::NOTICE;
+    if(level == "INFO")   return Priority::INFO;
+    if(level == "DEBUG")  return Priority::DEBUG;
+    if(level == "NOTSET") return Priority::NOTSET;
+    return Priority::NOTSET;
+}
+
+LoggerList Object::logs_;
 string Object::path_;
+Priority::PriorityLevel Object::level_;
 
-void Object::init(vector<LogAttr> _list, const string& path)
+void Object::init(const vector<string>& categoryNamelist, const string& path, const Priority::PriorityLevel level)
 {
-    path_ = path;// 日志文件路径
+    path_ = path;
+    level_ = level;
 
-    for(auto itr = _list.begin(); itr != _list.end(); ++itr)
-    {
-        auto index = std::distance(_list.begin(), itr);
-        loggerMap_.emplace(static_cast<LogId>(index), init(itr));
-    }
+    std::transform(categoryNamelist.begin(), categoryNamelist.end(), back_inserter(logs_), [](const string& item){
+        // 获取日志实例
+        auto& category = Category::getInstance(item);
+        // 添加输出源(通常，只需要一个滚动日志文件)
+        auto appender = Object::createAppender(item);
+        category.addAppender(appender);
+        // 设置日志级别
+        category.setPriority(level_);
+        return &category;
+    });
 }
 
-Category& Object::init(vector<LogAttr>::const_iterator itr)
+/**日志格式说明符列表：
+ * %d --date     创建时间
+ * %p --priority 级别
+ * %t --thread   线程名称
+ * %m --message  日志内容
+ * %n            换行符
+*/
+Layout* Object::createLayout()
 {
-    auto logName = std::get<0>(*itr);// 日志名称
-
-    // 格式
     auto layout = new PatternLayout();
-    layout->setConversionPattern("%d [%c] [%p] %m %n");
-    // 输出目标(磁盘文件)
-    const size_t MBytes = 1024 * 1024;// MB
-    const size_t maxFileSize = 10 * MBytes;// 单个日志文件容量上限
-    const unsigned maxBackupIndex = 3;// 日志文件数量上限
-    auto appender = new RollingFileAppender("DefaultAppender",
-                                            path_ + logName,
-                                            maxFileSize,
-                                            maxBackupIndex);
-    appender->setLayout(layout);
-
-    auto& logInstance = Category::getInstance(logName);
-    logInstance.addAppender(appender);
-
-    // 设置日志级别
-    auto logPriority = std::get<1>(*itr);
-    Priority::Value logPriorityValue;
-    if(logPriority == "ERROR") logPriorityValue = Priority::ERROR;
-    else if(logPriority == "WARN") logPriorityValue = Priority::WARN;
-    else if(logPriority == "INFO") logPriorityValue = Priority::INFO;
-    else if(logPriority == "DEBUG") logPriorityValue = Priority::DEBUG;
-    else logPriorityValue = Priority::DEBUG;
-    logInstance.setPriority(logPriorityValue);
-    return logInstance;
+    const string pattern("[%d] [%p] %m %n");
+    layout->setConversionPattern(pattern);
+    return layout;
 }
 
-Category& Object::getLogger(LogId id)
+Appender* Object::createAppender(const string& categoryName)
 {
-    return loggerMap_.at(id);// 下标不行，at()可以?
+    const string appenderName("DefaultAppender");
+    const string filename = path_ + categoryName + ".log";// 所在目录 + 文件名 + 文件后缀
+    auto appender = new RollingFileAppender(appenderName, filename);
+    const unsigned maxBackupIndex = 3;
+    appender->setMaxBackupIndex(maxBackupIndex);
+    appender->setLayout(createLayout());
+    return appender;
+}
+
+Category& Object::getLogger(const int index)
+{
+    assert(index < logs_.size());
+    return *logs_[index];
 }

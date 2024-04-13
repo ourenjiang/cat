@@ -1,0 +1,16 @@
+{
+    "files.associations": {
+        "tuple": "cpp",
+        "array": "cpp",
+        "string_view": "cpp",
+        "thread": "cpp",
+        "typeindex": "cpp",
+        "typeinfo": "cpp",
+        "deque": "cpp",
+        "list": "cpp",
+        "string": "cpp",
+        "unordered_map": "cpp",
+        "vector": "cpp",
+        "initializer_list": "cpp"
+    }
+}
