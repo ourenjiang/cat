@@ -1,0 +1,2 @@
+add_executable(mybenchmark mybenchmark.cpp)
+target_link_libraries(mybenchmark benchmark)

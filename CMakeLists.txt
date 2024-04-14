@@ -5,4 +5,4 @@ include(cmake-config/general_cfg.cmake)
 include(cmake-config/compiler_cfg.cmake)
 include(cmake-config/3rd_libs.cmake)
 
-add_subdirectory(empty_project)
+add_subdirectory(base_usage)
