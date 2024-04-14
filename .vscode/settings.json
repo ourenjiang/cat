@@ -1,0 +1,9 @@
+{
+    "files.associations": {
+        "htop_other.h": "c",
+        "platform.h": "c",
+        "linuxprocess.h": "c",
+        "perfcounter.h": "c",
+        "getopt.h": "c"
+    }
+}
