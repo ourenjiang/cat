@@ -1,0 +1,9 @@
+add_library(myself_communicate_serial SHARED
+SerialConnection.cpp
+SerialConnector.cpp
+SerialClient.cpp
+)
+
+target_link_libraries(myself_communicate_serial
+myself_reactor
+)

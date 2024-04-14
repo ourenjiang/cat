@@ -1,0 +1,7 @@
+add_subdirectory(sqlite)
+add_subdirectory(catch2)
+# add_subdirectory(boost_python)
+add_subdirectory(timeout)
+add_subdirectory(boost_property_tree)
+add_subdirectory(protobuf)
+add_subdirectory(framework)

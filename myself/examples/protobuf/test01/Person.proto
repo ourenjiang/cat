@@ -1,0 +1,14 @@
+syntax = "proto3"; 	//指明使用proto3语法
+
+package tutorial;		//包声明符, 产生的类会被包装在C++命名空间中
+
+message Persion //声明消息
+{
+    // string name = 1;
+    int32 age = 2;
+}
+
+message AddressBook //AddressBook消息中包含一个Persion消息
+{
+    Persion   persion = 1;
+}
