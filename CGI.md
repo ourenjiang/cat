@@ -1,0 +1,1 @@
+[shell脚本--编写CGI代码](https://www.bbsmax.com/A/xl56eW6kJr/)

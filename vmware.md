@@ -1,0 +1,1 @@
+[vmware的硬件选项里有关于虚拟化引擎的选项（虚拟机支持硬件虚拟化）](https://www.cnblogs.com/zknublx/p/9156560.html)

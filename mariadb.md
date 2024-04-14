@@ -1,0 +1,1 @@
+[mariadb远程不能访问，出现Can't  connect to  MySQL server on '' (10061)](https://blog.csdn.net/dong19891210/article/details/80511825)

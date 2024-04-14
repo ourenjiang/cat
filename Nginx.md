@@ -1,0 +1,1 @@
+[nginx参数fastcgi](https://blog.csdn.net/OfficerGoodbody/article/details/126662512)
