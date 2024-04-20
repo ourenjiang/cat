@@ -1,41 +1,42 @@
 set(meter_SRCS
-Meter.c
+meter/Meter.c
+meter/CPUMeter.c
 
 # 这5个功能是已经显示出来的
-CPUMeter.c         # CPU          
-LoadAverageMeter.c # 平均负载
-MemoryMeter.c      # 内存
-SwapMeter.c        # 交换内存
-TasksMeter.c       # 任务
-UptimeMeter.c      # 持续运行时长
+meter/CPUMeter.c         # CPU
+meter/LoadAverageMeter.c # 平均负载
+meter/MemoryMeter.c      # 内存
+meter/SwapMeter.c        # 交换内存
+meter/TasksMeter.c       # 任务
+meter/UptimeMeter.c      # 持续运行时长
 
 # 这3个功能并没有被显示出来，应该是在Linux中不支持.
-ClockMeter.c    # 时钟
-BatteryMeter.c  # 电池
-HostnameMeter.c # 主机名
+meter/ClockMeter.c    # 时钟
+meter/BatteryMeter.c  # 电池
+meter/HostnameMeter.c # 主机名
 )
 
 set(panel_SRCS
-Panel.c
-MainPanel.c              # 主面板
-MetersPanel.c            # 功能面板
-AvailableMetersPanel.c   # 可用功能面板
-AvailableColumnsPanel.c  # 可用列面板
-ColumnsPanel.c           # 列面板
-CategoriesPanel.c        # 分类面板
-AffinityPanel.c          # 同类面板
-SignalsPanel.c           # 信号面板
-DisplayOptionsPanel.c    # 显示选项面板
-ColorsPanel.c            # 颜色面板
-ScreensPanel.c           # 屏幕面板
+panel/Panel.c
+panel/MainPanel.c              # 主面板
+panel/MetersPanel.c            # 功能面板
+panel/AvailableMetersPanel.c   # 可用功能面板
+panel/AvailableColumnsPanel.c  # 可用列面板
+panel/ColumnsPanel.c           # 列面板
+panel/CategoriesPanel.c        # 分类面板
+panel/AffinityPanel.c          # 同类面板
+panel/SignalsPanel.c           # 信号面板
+panel/DisplayOptionsPanel.c    # 显示选项面板
+panel/ColorsPanel.c            # 颜色面板
+panel/ScreensPanel.c           # 屏幕面板
 )
 
 set(screen_SRCS
-ScreenManager.c     # 屏幕管理器
-OpenFilesScreen.c   # 打开文件屏幕
-TraceScreen.c       # 追踪屏幕
-InfoScreen.c        # 信息屏幕
-EnvScreen.c         # 环境屏幕
+screen/ScreenManager.c     # 屏幕管理器
+screen/OpenFilesScreen.c   # 打开文件屏幕
+screen/TraceScreen.c       # 追踪屏幕
+screen/InfoScreen.c        # 信息屏幕
+screen/EnvScreen.c         # 环境屏幕
 )
 
 set(linux_SRCS
@@ -48,32 +49,35 @@ linux/IOPriorityPanel.c
 linux/Battery.c
 )
 
+set(base_SRCS
+base/Hashtable.c
+base/Vector.c
+base/XAlloc.c
+base/Object.c
+base/CheckItem.c
+base/ListItem.c
+base/RichString.c
+base/StringUtils.c
+base/CRT.c
+)
+
 add_executable(htop
-htop.c
+main.c
 htop_other.c
 Header.c
 Process.c
 UsersTable.c
 Settings.c
-CRT.c
-ListItem.c
 Action.c
-XAlloc.c
-Hashtable.c
 ProcessList.c
-StringUtils.c
-RichString.c
-Object.c
 FunctionBar.c
 IncSet.c
 Affinity.c
-Vector.c
-Hashtable.c
-CheckItem.c
 ${meter_SRCS}
 ${panel_SRCS}
 ${screen_SRCS}
 ${linux_SRCS}
+${base_SRCS}
 )
 
 target_link_libraries(htop

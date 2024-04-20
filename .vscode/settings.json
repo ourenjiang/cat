@@ -4,6 +4,17 @@
         "platform.h": "c",
         "linuxprocess.h": "c",
         "perfcounter.h": "c",
-        "getopt.h": "c"
+        "getopt.h": "c",
+        "typeindex": "c",
+        "typeinfo": "c",
+        "array": "c",
+        "compare": "c",
+        "complex": "c",
+        "functional": "c",
+        "ratio": "c",
+        "tuple": "c",
+        "type_traits": "c",
+        "utility": "c",
+        "variant": "c"
     }
 }

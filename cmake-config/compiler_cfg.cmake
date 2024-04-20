@@ -8,6 +8,10 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 include_directories(${CMAKE_SOURCE_DIR}/htop-3.0.0beta5)
 include_directories(${CMAKE_SOURCE_DIR}/htop-3.0.0beta5/linux)
+include_directories(${CMAKE_SOURCE_DIR}/htop-3.0.0beta5/base)
+include_directories(${CMAKE_SOURCE_DIR}/htop-3.0.0beta5/meter)
+include_directories(${CMAKE_SOURCE_DIR}/htop-3.0.0beta5/panel)
+include_directories(${CMAKE_SOURCE_DIR}/htop-3.0.0beta5/screen)
 link_directories(${CMAKE_BINARY_DIR}/lib)
 
 set(CMAKE_CXX_FLAGS

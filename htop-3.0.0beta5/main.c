@@ -45,7 +45,7 @@ int main(int argc, char** argv)
     * 设置列宽 ??
     * 不执行，好像也没什么问题。
    */
-   // Process_setupColumnWidths();
+   Process_setupColumnWidths();
 
    /**
     * 用户表 和 进程列表，两者的关系是怎样的？
@@ -107,9 +107,9 @@ int main(int argc, char** argv)
    ScreenManager_add(scr, (Panel*) panel, -1);// 向屏幕管理器 添加 一个面板
 
    // 这部分还没看出来干嘛的
-   // ProcessList_scan(pl);
-   // millisleep(75);
-   // ProcessList_scan(pl);
+   ProcessList_scan(pl);
+   millisleep(75);
+   ProcessList_scan(pl);
 
    ScreenManager_run(scr, NULL, NULL, NULL);
    
