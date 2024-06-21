@@ -89,7 +89,9 @@ private:
     std::string publishAddress_;
     log4cpp::Category& log_;
     std::shared_ptr<ZmqRequest> ZmqRequest_;
-    uint16_t pollerCurrentBcuIndex_;
+    // uint16_t pollerCurrentBcuIndex_;
+    vector<int> bcuIndexListOnline_;
+    vector<int>::iterator bcuIndexListOnlineItr_;
     std::shared_ptr<ZmqSubscribe> bauFrameSubscriber_;
     std::shared_ptr<ZmqPublish> bcuFramePublisher_;
     BauStatusSummary bauStatus_;

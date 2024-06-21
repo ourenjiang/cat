@@ -111,11 +111,12 @@ Json::Value HeapSystem::get_powerEnvSystem() const
 
 Json::Value HeapSystem::get_bcu(const map<int, BcuInfo>& bcuMap) const
 {
-    Json::Value content;
+    Json::Value content(Json::arrayValue);
 
     for(const auto& item: bcuMap){
-        Json::Value branch = get_bcu(item.second);
-        content.append(branch);
+        Json::Value info = get_bcu(item.second);
+        info["index"] = to_string(item.first);
+        content.append(info);
     }
     return content;
 }

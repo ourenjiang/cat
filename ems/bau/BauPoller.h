@@ -64,6 +64,7 @@ struct BauStatusSummary
     uint16_t bmuCellVoltSize;//单个BMU电芯电压数量
     uint16_t bmuCellTemSize;//单个BMU电芯温度数量
     uint16_t bmuTerminalTemSize;//单个BMU端子温度数量
+    vector<int> bcuIndexListOnline;// 在线BCU编号列表
 
     /******** 以下为统计值 ********/
     size_t warnCountL1;//1级告警数量
@@ -81,7 +82,8 @@ struct BauStatusSummary
                     chargeCapacitySum, dischargeCapacitySum,
                     pcsRequestChargeCur, pcsRequestChargeVolt, pcsRequestDischargeCur, pcsRequestDischargeVolt,
                     allowChargeCapacity, allowDischargeCapacity,
-                    bcuNum, bcuOnlineNum, bcuSize, bmuCellVoltSize, bmuCellTemSize, bmuTerminalTemSize);
+                    bcuNum, bcuOnlineNum, bcuSize, bmuCellVoltSize, bmuCellTemSize, bmuTerminalTemSize, bcuIndexListOnline,
+                    warnCountL1, warnCountL2, warnCountL3, warnCountTotal, cellNum);
 };
 
 struct BingjiStatusSummary

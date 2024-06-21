@@ -148,12 +148,12 @@ struct BauInfo
 {
     BauInfo()
         : onlineFlag(false)
-        , inited(false)
+        , initFlag(false)
     {
     }
 
     bool onlineFlag;// 在线标志
-    bool inited;//初始化标志
+    bool initFlag;// 在线标志
 
     bau::PollForward pollForward;//轮询转发
     BauPoller bauPoller;//帧轮询器

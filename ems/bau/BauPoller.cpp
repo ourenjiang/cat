@@ -178,7 +178,8 @@ std::optional<BauStatusSummary> BauPoller::doFrameBauStatus()
 {
 try
 {
-    const uint16_t requestRegisterNum{ 0x0350 - 0x0300 + 1 };
+    // const uint16_t requestRegisterNum{ 0x0350 - 0x0300 + 1 };
+    const uint16_t requestRegisterNum{ 0x0352 - 0x0300 + 1 };
     auto reqmsg = miscellaneous::createModbusRtuReadFrame(0x01, 0x03, 0x0300, requestRegisterNum);
     auto pollResult = pollMessage(reqmsg);
     if(!pollResult.has_value()){
@@ -209,7 +210,7 @@ catch(const std::exception& e){
 
 BauStatusSummary BauPoller::createBauStatusSummary(const vector<uint16_t>& frameRegisters)
 {
-    const uint16_t registerNum{ 0x51 };
+    const uint16_t registerNum{ 0x53 };
     BOOST_ASSERT(frameRegisters.size() == registerNum);
 
     BauStatusSummary summary;
@@ -327,6 +328,16 @@ BauStatusSummary BauPoller::createBauStatusSummary(const vector<uint16_t>& frame
     summary.bmuCellVoltSize = getU16(0x034E, 0x0300, frameRegisters);
     summary.bmuCellTemSize = getU16(0x034F, 0x0300, frameRegisters);
     summary.bmuTerminalTemSize = getU16(0x0350, 0x0300, frameRegisters);
+
+    {
+        const uint32_t bcuIndexBitMap = getU32(0x0351, 0x0300, frameRegisters);
+        const int bcuMaxSize{ 20 };
+        const bitset<bcuMaxSize> bcuIndexBitSets(bcuIndexBitMap);
+        for(int bcuIndex = 0; bcuIndex < bcuMaxSize; ++bcuIndex){
+            if(bcuIndexBitSets[bcuIndex])
+                summary.bcuIndexListOnline.push_back(bcuIndex);
+        }
+    }
     
     {
         summary.cellNum = summary.bcuNum * summary.bcuSize;

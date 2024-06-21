@@ -13,7 +13,7 @@ using namespace ems::bau;
 
 BcuPoller::BcuPoller()
     : log_(ems::Log4cppWrapper::getLogger(3))
-    , pollerCurrentBcuIndex_(0)
+    , bcuIndexListOnlineItr_(bcuIndexListOnline_.begin())
 {
 }
 
@@ -51,8 +51,13 @@ void BcuPoller::start()
         const uint16_t bcuNum{ bauStatus_.bcuOnlineNum };
         if(bcuNum == 0) return;
 
-        if(pollerCurrentBcuIndex_ >= bcuNum) pollerCurrentBcuIndex_ = 0;
-        doBcu(pollerCurrentBcuIndex_++);// prepare next
+        // if(pollerCurrentBcuIndex_ >= bcuNum) pollerCurrentBcuIndex_ = 0;
+        // doBcu(pollerCurrentBcuIndex_++);// prepare next
+        if(bcuIndexListOnline_.empty()) continue;
+        if(bcuIndexListOnlineItr_ == bcuIndexListOnline_.end())
+            bcuIndexListOnlineItr_ = bcuIndexListOnline_.begin();
+        doBcu(*bcuIndexListOnlineItr_++);// prepare next
+        bauStatus_.bcuIndexListOnline;
     }});
 }
 
@@ -76,6 +81,10 @@ bool BcuPoller::catchFrameBauBauStatus(const string& message)
     BOOST_ASSERT(unpackResult);
 
     auto& [branchIndex, bingjiStatusSummaryNew, bauStatusSummaryNew] = requestBody;
+    if(bcuIndexListOnline_ != bauStatusSummaryNew.bcuIndexListOnline){
+        bcuIndexListOnline_ = bauStatusSummaryNew.bcuIndexListOnline;
+        bcuIndexListOnlineItr_ = bcuIndexListOnline_.begin();
+    }
     bauStatus_ = bauStatusSummaryNew;
     return true;
 }

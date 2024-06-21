@@ -78,7 +78,40 @@ void Station::initXftg(xftg::StrategyXftg& xftgInfo, const int branchIndex)
     xftgInfo.start();
 }
 
-void Station::initBauStruct(const int branchIndex, const int bcuNum, const int bmuNum)
+void Station::initBcuList(map<int, bau::BcuInfo>& bcuList, const vector<int>& bcuIndexListOnline, const int bmuNum)
+{
+    for(const auto onlineIndex: bcuIndexListOnline){
+
+        // 创建新结点（如果不存在)
+        auto itr = bcuList.find(onlineIndex);
+        if(itr != bcuList.end()) continue;
+        auto [bcuItr, isCreated] = bcuList.emplace(onlineIndex, bau::BcuInfo());
+        BOOST_ASSERT(isCreated);
+
+        // 创建BCU内部的所有BMU
+        auto& bcuInfo = bcuItr->second;
+        auto& bmuList = bcuInfo.bmuList;
+        for(size_t bmuIndex = 0; bmuIndex < bmuNum; ++bmuIndex)
+            bmuList.emplace(bmuIndex, bau::BmuInfo());
+    }
+
+    // 删除已离线的BCU
+    if(bcuList.size() > bcuIndexListOnline.size()){
+
+        for(auto bcuItr = bcuList.begin(); bcuItr != bcuList.end();){
+            auto bcuIndexOnlineItr = std::find_if(bcuIndexListOnline.begin(), bcuIndexListOnline.end(), [&](const int& bcuIndexOnline){
+                return bcuIndexOnline == bcuItr->first;
+            });
+            if(bcuIndexOnlineItr == bcuIndexListOnline.end()){
+                bcuItr = bcuList.erase(bcuItr);//更新迭代器
+            }
+            else
+                ++bcuItr;
+        }
+    }
+}
+
+void Station::initBauStruct(const int branchIndex, const vector<int>& bcuIndexList, const int bmuNum)
 {
     auto& branchList = stationInfo_->branchList;
     auto branchItr = branchList.find(branchIndex);
@@ -88,39 +121,29 @@ void Station::initBauStruct(const int branchIndex, const int bcuNum, const int b
 
     auto& branchInfo = branchItr->second;
     auto& bauInfo = branchInfo->bauInfo;
-    if(bauInfo.inited) return;
+    initBcuList(bauInfo.bcuList, bcuIndexList, bmuNum);
 
-    auto& bcuList = bauInfo.bcuList;
-    BOOST_ASSERT(bcuList.empty());
-    for(size_t i = 0; i < bcuNum; ++i){
-        bcuList.emplace(i, bau::BcuInfo());
+    if(!bauInfo.initFlag)
+    {
+        auto& bauPoller = bauInfo.bauPoller;
+        uint16_t bauPublishPort = bauPoller.getPublishPort();
 
-        auto& bcuInfo = bcuList[i];
-        auto& bmuList = bcuInfo.bmuList;
-        BOOST_ASSERT(bmuList.empty());
-        for(size_t j = 0; j < bmuNum; ++j){
-            bmuList.emplace(j, bau::BmuInfo());
-        }
+        // init bcu poller
+        auto& bcuPoller = bauInfo.bcuPoller;
+        bcuPoller.subscribeBauStatus("tcp://localhost:" + to_string(bauPublishPort), "BauSummary");
+        bcuPoller.setBranchIndex(branchIndex);
+        bcuPoller.initPublishInterface("tcp://localhost:" + to_string(bauPublishPort + 1));
+        bcuPoller.start();
+
+        // init bmu poller
+        auto& bmuPoller = bauInfo.bmuPoller;
+        bmuPoller.subscribeBauStatus("tcp://localhost:" + to_string(bauPublishPort), "BauSummary");
+        bmuPoller.setBranchIndex(branchIndex);
+        bmuPoller.initPublishInterface("tcp://localhost:" + to_string(bauPublishPort + 2));
+        bmuPoller.start();
+
+        bauInfo.initFlag = true;// 置为已初始化状态
     }
-
-    auto& bauPoller = bauInfo.bauPoller;
-    uint16_t bauPublishPort = bauPoller.getPublishPort();
-
-    // init bcu poller
-    auto& bcuPoller = bauInfo.bcuPoller;
-    bcuPoller.subscribeBauStatus("tcp://localhost:" + to_string(bauPublishPort), "BauSummary");
-    bcuPoller.setBranchIndex(branchIndex);
-    bcuPoller.initPublishInterface("tcp://localhost:" + to_string(bauPublishPort + 1));
-    bcuPoller.start();
-
-    // init bmu poller
-    auto& bmuPoller = bauInfo.bmuPoller;
-    bmuPoller.subscribeBauStatus("tcp://localhost:" + to_string(bauPublishPort), "BauSummary");
-    bmuPoller.setBranchIndex(branchIndex);
-    bmuPoller.initPublishInterface("tcp://localhost:" + to_string(bauPublishPort + 2));
-    bmuPoller.start();
-
-    bauInfo.inited = true;// 初始化完成
 }
 
 void Station::start()
@@ -342,7 +365,7 @@ bool Station::parseBauTopicBauStatus(const string& message)
     // 更新三级告警状态
     updateBauWarningAndFaultMap(bauInfo, bauStatusSummaryCache.warnCountL1, bauStatusSummaryCache.warnCountL2,
                                 bauStatusSummaryCache.warnCountL3, bauStatusSummaryCache.faultStatus);
-    initBauStruct(branchIndex, bauStatusSummaryCache.bcuNum, bauStatusSummaryCache.bcuSize);// 刷新BAU结构
+    initBauStruct(branchIndex, bauStatusSummaryCache.bcuIndexListOnline, bauStatusSummaryCache.bcuSize);// 刷新BAU结构
 
     {
         /** 更新SOC实时曲线 */

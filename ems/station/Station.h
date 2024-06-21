@@ -54,8 +54,9 @@ private:
     void initBau(bau::BauInfo& bauInfo, const int branchIndex);
     void initPcs(pcs::PcsInfo& pcsInfo, const int branchIndex);
     void initXftg(xftg::StrategyXftg& xftgInfo, const int branchIndex);
+    void initBauStruct(const int, const vector<int>&, const int);
+    void initBcuList(map<int, bau::BcuInfo>& bcuList, const vector<int>& bcuIndexListOnline, const int);
     void doXftgStrategy(BranchInfo& branchInfo);
-    void initBauStruct(const int, const int, const int);
     
     void bauReceiveCallback(const string& sub);
     bool parseBauTopicBauStatus(const string& message);
