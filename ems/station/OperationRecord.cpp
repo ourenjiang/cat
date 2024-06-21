@@ -63,14 +63,10 @@ try
     // 查询
     vector<OperationRecordInfo> records;
     OperationRecordDb << "SELECT "
-                            "STATUS, CONTENT, "
-                            "TYPE, CREATE_TIME, "
-                            "USERNAME "
+                            "STATUS, CONTENT, TYPE, CREATE_TIME, USERNAME "
                             "FROM OPERATION_RECORD "
-                            "WHERE STATUS LIKE ? "
-                            "AND TYPE LIKE ? "
-                            "AND CREATE_TIME >= ? "
-                            "AND CREATE_TIME <= ? "
+                            "WHERE STATUS LIKE ? AND TYPE LIKE ? "
+                            "AND CREATE_TIME >= ? AND CREATE_TIME <= ? "
                             "AND USERNAME LIKE ? "
                             "LIMIT ? OFFSET ?"
                         << patternStatus << patternType
