@@ -1,0 +1,139 @@
+
+# 全局配置
+global:
+{
+    ## 服务根路径
+    rootPath: /opt/paceic_ems_server,
+    logPath: /main/log,
+    dbPath: /main/db,
+}
+
+## 日志输出级别
+## [ERROR, WARN, INFO, DEBUG]
+logger:
+[
+    {
+        name: MQServer,
+        priority: DEBUG
+    },
+    {
+        name: ProxyBau,
+        priority: DEBUG
+    },
+    {
+        name: ProxyPcs,
+        priority: DEBUG
+    },
+    {
+        name: CollectorBau,
+        priority: DEBUG
+    },
+    {
+        name: CollectorPcs,
+        priority: DEBUG
+    },
+    {
+        name: Interface,
+        priority: DEBUG
+    },
+    {
+        name: Xftg,
+        priority: DEBUG
+    },
+    {
+        name: Monitor,
+        priority: DEBUG
+    },
+    {
+        name: Station,
+        priority: DEBUG
+    }
+]
+
+## 采集器
+collector:
+[
+    {
+        name: BAU,
+        load: true,
+        master:
+        {
+            # address: tcp://192.168.10.251:5557
+            address: tcp://127.0.0.1:5557
+        },
+        proxy:
+        {
+            address: tcp://*:5557
+        },
+        slave:
+        {
+            type: ModbusTCP,
+            slaveId: 1,
+            # address: 127.0.0.1:1502
+            address: 192.168.10.250:502
+        }
+    },
+    {
+        name: PCS,
+        load: true,
+        master:
+        {
+            # address: tcp://192.168.10.251:5558
+            address: tcp://127.0.0.1:5558
+        },
+        proxy:
+        {
+            address: tcp://*:5558
+        },
+        slave:
+        {
+            type: ModbusTCP,
+            slaveId: 1,
+            address: 192.168.10.252:9001
+            # address: 127.0.0.1:9001
+        }
+    }
+]
+
+# 数据接口
+dataInterface:
+{
+    # Http端口号
+    httpPort: 8901
+}
+
+# 控制策略
+strategy:
+{
+    # 削峰填谷
+    xftg:
+    {
+        # 通讯地址
+        pcsAddress: tcp://192.168.10.251:5557
+    }
+}
+
+# modbus模拟器
+simulator:
+{
+    master:
+    {
+        slaveId: 1,
+        address: /dev/pts/6,
+        baud: 9600,
+        parity: 'N',
+        dataBit: 8,
+        stopBit: 1
+    },
+    slave:
+    {
+        slaveId: 1,
+        address: /dev/pts/7,
+        baud: 9600,
+        parity: 'N',
+        dataBit: 8,
+        stopBit: 1
+    }
+}
+
+## 注意，yaml-cpp文件末尾必须要保留空行，否则解析时会失败！！！

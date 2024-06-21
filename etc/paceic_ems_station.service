@@ -1,0 +1,14 @@
+[Unit]
+Description=Paceic-EMS-Station
+
+[Service]
+Type=simple
+User=root
+Group=root
+# EnvironmentFile=/opt/paceic_ems_server/main/environment_file
+ExecStart=/opt/paceic_ems_server/main/bin/station
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

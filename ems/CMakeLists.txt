@@ -1,0 +1,6 @@
+add_subdirectory(bau)
+add_subdirectory(pcs)
+add_subdirectory(solar)
+add_subdirectory(profit)
+add_subdirectory(xftg)
+add_subdirectory(station)
