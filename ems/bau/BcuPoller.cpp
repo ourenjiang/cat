@@ -109,22 +109,21 @@ std::optional<vector<uint8_t>> BcuPoller::pollMessage(const vector<uint8_t>& req
         zmqDealer_.send(sndmsg, zmq::send_flags::none);
     }
 
-    {
-        zmq::pollitem_t item{ zmqDealer_, 0, ZMQ_POLLIN, 0 };
-        const int pollResult = zmq::poll(&item, 1, std::chrono::seconds(1));
-        BOOST_ASSERT(pollResult == 0 || pollResult == 1);
-
-        if(pollResult == 1){
-            zmq::message_t delimiter;
-            (void)zmqDealer_.recv(delimiter);
-            zmq::message_t rcvmsg;
-            (void)zmqDealer_.recv(rcvmsg);
-            const vector<uint8_t> repmsg(reinterpret_cast<uint8_t*>(rcvmsg.data()),
-                                            reinterpret_cast<uint8_t*>(rcvmsg.data()) + rcvmsg.size());
-            return repmsg;
-        }
+    zmq::pollitem_t item{ zmqDealer_, 0, ZMQ_POLLIN, 0 };
+    const int pollResult = zmq::poll(&item, 1, std::chrono::seconds(1));
+    BOOST_ASSERT(pollResult == 0 || pollResult == 1);
+    if(pollResult == 0){
+        log_.errorStream() << "recv timeout";
+        return {};
     }
-    return {};
+
+    zmq::message_t delimiter;
+    (void)zmqDealer_.recv(delimiter);
+    zmq::message_t rcvmsg;
+    (void)zmqDealer_.recv(rcvmsg);
+    const vector<uint8_t> repmsg(reinterpret_cast<uint8_t*>(rcvmsg.data()),
+                                    reinterpret_cast<uint8_t*>(rcvmsg.data()) + rcvmsg.size());
+    return repmsg;
 }
 
 void BcuPoller::doBcu(const uint16_t bcuIndex)
