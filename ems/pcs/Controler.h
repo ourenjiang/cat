@@ -12,7 +12,8 @@ class Controler
 {
 public:
     Controler();
-    bool pollMessage(vector<uint8_t>& requestMessage, vector<uint8_t>& respondMessage);
+    // bool pollMessage(vector<uint8_t>& requestMessage, vector<uint8_t>& respondMessage);
+    std::optional<vector<uint8_t>> pollMessage(const vector<uint8_t>& reqmsg);
     void setActivePower(const string& status, const double power);// 设置有功功率
     void verifyRemoteMode();
     bool verifyFault();
@@ -27,7 +28,8 @@ private:
     bool needOnByPcsValidPower();// 因长期有效的功率值而开关
 
     log4cpp::Category& log_;
-    std::unique_ptr<ZmqRequest> requester_;
+    zmq::context_t zmqContext_;
+    zmq::socket_t zmqDealer_;
 };
 }//namespace pcs
 }//namespace ems

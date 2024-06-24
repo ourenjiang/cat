@@ -43,27 +43,19 @@ void PollForward::start()
     {
         zmq::message_t identity;
         (void)zmqRouter_.recv(identity);
-        zmq::message_t delimiter;
-        (void)zmqRouter_.recv(delimiter);
         zmq::message_t rcvmsg;
         (void)zmqRouter_.recv(rcvmsg);
 
         //消息代理
         auto pollResult = pollModbusSlave(rcvmsg);
-        if(pollResult.has_value()){
-
-            const auto& modbusRespond = pollResult.value();
-            // auto serializedMsg = msgpackWrapper::pack(modbusRespond);
-            // zmq::message_t sndmsg(serializedMsg.data(), serializedMsg.size());
-            zmq::message_t sndmsg(modbusRespond.data(), modbusRespond.size());
-            zmqRouter_.send(identity, zmq::send_flags::sndmore);
-            zmqRouter_.send(delimiter, zmq::send_flags::sndmore);
-            zmqRouter_.send(sndmsg, zmq::send_flags::none);
-            log_.debug("pollMessage success");
-        }
-        else{
+        if(!pollResult.has_value()){
             log_.debug("pollMessage failed");
+            continue;
         }
+        const auto& modbusRespond = pollResult.value();
+        zmqRouter_.send(identity, zmq::send_flags::sndmore);
+        zmq::message_t sndmsg(modbusRespond.data(), modbusRespond.size());
+        zmqRouter_.send(sndmsg, zmq::send_flags::none);
     }});
 }
 

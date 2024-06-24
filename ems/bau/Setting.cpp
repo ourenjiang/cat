@@ -11,6 +11,7 @@ using namespace ems;
 using namespace ems::bau;
 
 Setting::Setting()
+    : zmqDealerBau_(zmqContext_, zmq::socket_type::dealer)
 {
     registerHttpInterfaces();
     stationRequester_ = make_unique<ZmqRequest>("tcp://127.0.0.1:6200");
@@ -25,7 +26,8 @@ Setting::Setting()
         BOOST_ASSERT((*resultLoad)["load"].as<bool>());
 
         const string proxyAddress = (*resultLoad)["master"]["address"].as<string>();
-        bauRequester_ = make_shared<ZmqRequest>(proxyAddress);
+        // bauRequester_ = make_shared<ZmqRequest>(proxyAddress);
+        zmqDealerBau_.connect(proxyAddress);
     }
 }
 
@@ -282,7 +284,7 @@ catch(const std::exception& e){
 }
 }
 
-vector<byte> Setting::respondCallbacPowerOff(std::shared_ptr<StationInfo> stationInfo, const vector<byte>& msgbody) const
+vector<byte> Setting::respondCallbacPowerOff(std::shared_ptr<StationInfo> stationInfo, const vector<byte>& msgbody)
 {
     string requestMsg;
     const bool unpackResult = msgpackWrapper::unpack(msgbody.data(), msgbody.size(), requestMsg);
@@ -302,21 +304,19 @@ vector<byte> Setting::respondCallbacPowerOff(std::shared_ptr<StationInfo> statio
     uint16_t regData{ 0 };
     auto reqmsg = miscellaneous::createModbusRtuWriteFrame(0x01, 0x06, regAddress, regData);
 
-    // 发送Modbus请求
-    auto serializedMsg = msgpackWrapper::pack(reqmsg);
-    const vector<byte> sendmsg(reinterpret_cast<byte*>(serializedMsg.data()),
-                                reinterpret_cast<byte*>(serializedMsg.data()) + serializedMsg.size());
-    bool sendResult = bauRequester_->send(sendmsg);
-    if(!sendResult) throw std::runtime_error("zmq send err");
+    zmq::message_t sndmsg(reqmsg.data(), reqmsg.size());
+    zmqDealerBau_.send(sndmsg, zmq::send_flags::none);
 
-    // 接收消息
-    const auto recvResult = bauRequester_->recv();
-    if(!recvResult) throw std::runtime_error("zmq recv failed");
-    const auto recvmsg = recvResult.value();
+    zmq::pollitem_t item{ zmqDealerBau_, 0, ZMQ_POLLIN, 0 };
+    const int pollResult = zmq::poll(&item, 1, std::chrono::seconds(1));
+    BOOST_ASSERT(pollResult == 0 || pollResult == 1);
+    if(pollResult == 0)
+        throw std::runtime_error("zmq recv failed");
 
-    // 反序列化
-    vector<uint8_t> repmsg;
-    const bool unpackMsgResult = msgpackWrapper::unpack(recvmsg.data(), recvmsg.size(), repmsg);
+    zmq::message_t rcvmsg;
+    (void)zmqDealerBau_.recv(rcvmsg);
+    const vector<uint8_t> repmsg(reinterpret_cast<uint8_t*>(rcvmsg.data()),
+                            reinterpret_cast<uint8_t*>(rcvmsg.data()) + rcvmsg.size());
     if(reqmsg != repmsg)
         throw std::runtime_error("recv frame err");
 
@@ -326,7 +326,7 @@ vector<byte> Setting::respondCallbacPowerOff(std::shared_ptr<StationInfo> statio
             reinterpret_cast<const byte*>(result.data()) + result.size() };
 }
 
-vector<byte> Setting::respondCallbacQuickStartup(std::shared_ptr<StationInfo> stationInfo, const vector<byte>& msgbody) const
+vector<byte> Setting::respondCallbacQuickStartup(std::shared_ptr<StationInfo> stationInfo, const vector<byte>& msgbody)
 {
     string requestMsg;
     const bool unpackResult = msgpackWrapper::unpack(msgbody.data(), msgbody.size(), requestMsg);
@@ -346,21 +346,19 @@ vector<byte> Setting::respondCallbacQuickStartup(std::shared_ptr<StationInfo> st
     uint16_t regData{ 0 };
     auto reqmsg = miscellaneous::createModbusRtuWriteFrame(0x01, 0x06, regAddress, regData);
 
-    // 发送Modbus请求
-    auto serializedMsg = msgpackWrapper::pack(reqmsg);
-    const vector<byte> sendmsg(reinterpret_cast<byte*>(serializedMsg.data()),
-                                reinterpret_cast<byte*>(serializedMsg.data()) + serializedMsg.size());
-    bool sendResult = bauRequester_->send(sendmsg);
-    if(!sendResult) throw std::runtime_error("zmq send err");
+    zmq::message_t sndmsg(reqmsg.data(), reqmsg.size());
+    zmqDealerBau_.send(sndmsg, zmq::send_flags::none);
 
-    // 接收消息
-    const auto recvResult = bauRequester_->recv();
-    if(!recvResult) throw std::runtime_error("zmq recv failed");
-    const auto recvmsg = recvResult.value();
+    zmq::pollitem_t item{ zmqDealerBau_, 0, ZMQ_POLLIN, 0 };
+    const int pollResult = zmq::poll(&item, 1, std::chrono::seconds(1));
+    BOOST_ASSERT(pollResult == 0 || pollResult == 1);
+    if(pollResult == 0)
+        throw std::runtime_error("zmq recv failed");
 
-    // 反序列化
-    vector<uint8_t> repmsg;
-    const bool unpackMsgResult = msgpackWrapper::unpack(recvmsg.data(), recvmsg.size(), repmsg);
+    zmq::message_t rcvmsg;
+    (void)zmqDealerBau_.recv(rcvmsg);
+    const vector<uint8_t> repmsg(reinterpret_cast<uint8_t*>(rcvmsg.data()),
+                            reinterpret_cast<uint8_t*>(rcvmsg.data()) + rcvmsg.size());
     if(reqmsg != repmsg)
         throw std::runtime_error("recv frame err");
 
@@ -370,7 +368,7 @@ vector<byte> Setting::respondCallbacQuickStartup(std::shared_ptr<StationInfo> st
             reinterpret_cast<const byte*>(result.data()) + result.size() };
 }
 
-vector<byte> Setting::respondCallbacSetBcuRelay(std::shared_ptr<StationInfo> stationInfo, const vector<byte>& msgbody) const
+vector<byte> Setting::respondCallbacSetBcuRelay(std::shared_ptr<StationInfo> stationInfo, const vector<byte>& msgbody)
 {
     tuple<string, string, string> requestMsg;
     const bool unpackResult = msgpackWrapper::unpack(msgbody.data(), msgbody.size(), requestMsg);
@@ -396,21 +394,19 @@ vector<byte> Setting::respondCallbacSetBcuRelay(std::shared_ptr<StationInfo> sta
     uint16_t regData{ 0 };
     auto reqmsg = miscellaneous::createModbusRtuWriteFrame(0x01, 0x06, regAddress, regData);
 
-    // 发送Modbus请求
-    auto serializedMsg = msgpackWrapper::pack(reqmsg);
-    const vector<byte> sendmsg(reinterpret_cast<byte*>(serializedMsg.data()),
-                                reinterpret_cast<byte*>(serializedMsg.data()) + serializedMsg.size());
-    bool sendResult = bauRequester_->send(sendmsg);
-    if(!sendResult) throw std::runtime_error("zmq send err");
+    zmq::message_t sndmsg(reqmsg.data(), reqmsg.size());
+    zmqDealerBau_.send(sndmsg, zmq::send_flags::none);
 
-    // 接收消息
-    const auto recvResult = bauRequester_->recv();
-    if(!recvResult) throw std::runtime_error("zmq recv failed");
-    const auto recvmsg = recvResult.value();
+    zmq::pollitem_t item{ zmqDealerBau_, 0, ZMQ_POLLIN, 0 };
+    const int pollResult = zmq::poll(&item, 1, std::chrono::seconds(1));
+    BOOST_ASSERT(pollResult == 0 || pollResult == 1);
+    if(pollResult == 0)
+        throw std::runtime_error("zmq recv failed");
 
-    // 反序列化
-    vector<uint8_t> repmsg;
-    const bool unpackMsgResult = msgpackWrapper::unpack(recvmsg.data(), recvmsg.size(), repmsg);
+    zmq::message_t rcvmsg;
+    (void)zmqDealerBau_.recv(rcvmsg);
+    const vector<uint8_t> repmsg(reinterpret_cast<uint8_t*>(rcvmsg.data()),
+                            reinterpret_cast<uint8_t*>(rcvmsg.data()) + rcvmsg.size());
     if(reqmsg != repmsg)
         throw std::runtime_error("recv frame err");
 

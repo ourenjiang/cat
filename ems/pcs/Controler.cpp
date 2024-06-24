@@ -9,6 +9,7 @@ using namespace ems::pcs;
 
 Controler::Controler()
     : log_(ems::Log4cppWrapper::getLogger(0))
+    , zmqDealer_(zmqContext_, zmq::socket_type::dealer)
 {
     {
         auto& cfgRoot = YamlcppWrapper::getRoot();
@@ -20,36 +21,28 @@ Controler::Controler()
         BOOST_ASSERT((*resultLoad)["load"].as<bool>());
 
         const string proxyAddress = (*resultLoad)["master"]["address"].as<string>();
-        requester_ = make_unique<ZmqRequest>(proxyAddress);
+        zmqDealer_.connect(proxyAddress);
     }
 }
 
-bool Controler::pollMessage(vector<uint8_t> &requestMessage, vector<uint8_t> &respondMessage)
+// bool Controler::pollMessage(vector<uint8_t> &requestMessage, vector<uint8_t> &respondMessage)
+std::optional<vector<uint8_t>> Controler::pollMessage(const vector<uint8_t>& reqmsg)
 {
-    auto serializedMsg = msgpackWrapper::pack(requestMessage);// 序列化
-    const vector<byte> sendmsg(reinterpret_cast<byte*>(serializedMsg.data()),
-                                reinterpret_cast<byte*>(serializedMsg.data()) + serializedMsg.size());
-    bool sendResult = requester_->send(sendmsg);
-    if(!sendResult)
-    {
-        log_.error("send failed");
+    zmq::message_t sndmsg(reqmsg.data(), reqmsg.size());
+    zmqDealer_.send(sndmsg, zmq::send_flags::none);
+    
+    zmq::pollitem_t item{ zmqDealer_, 0, ZMQ_POLLIN, 0 };
+    const int pollResult = zmq::poll(&item, 1, std::chrono::seconds(1));
+    BOOST_ASSERT(pollResult == 0 || pollResult == 1);
+    if(pollResult == 0){
+        log_.errorStream() << "recv timeout";
+        return {};
     }
 
-    // 接收
-    const auto recvResult = requester_->recv();
-    if(!recvResult.has_value()){
-        cout << "recv failed" << endl;
-        return false;
-    }
-    const auto recvmsg = recvResult.value();
-
-    // 2.2 消息反序列化
-    if(!msgpackWrapper::unpack(recvmsg.data(), recvmsg.size(), respondMessage))
-    {
-        return false;
-    }
-    log_.debug("recv success");
-    return true;
+    zmq::message_t rcvmsg;
+    (void)zmqDealer_.recv(rcvmsg);
+    return vector<uint8_t>(reinterpret_cast<uint8_t*>(rcvmsg.data()),
+                                    reinterpret_cast<uint8_t*>(rcvmsg.data()) + rcvmsg.size());
 }
 
 void Controler::setPowerOff()
@@ -74,11 +67,12 @@ void Controler::setPowerOff()
         }
     }
 
-    vector<uint8_t> respondMessage;
-    if(pollMessage(requestMessage, respondMessage))
-    {
-        log_.debug("set pcs off success");
-    }
+    auto pollResult = pollMessage(requestMessage);
+    if(!pollResult.has_value())
+        log_.debug("set pcs powerOff failed");
+    const vector<uint8_t> repmsg = pollResult.value();
+    if(requestMessage != repmsg)
+        log_.debug("set pcs powerOff recv msg err");
 }
 
 void Controler::setPowerOn()
@@ -103,11 +97,12 @@ void Controler::setPowerOn()
         }
     }
 
-    vector<uint8_t> respondMessage;
-    if(pollMessage(requestMessage, respondMessage))
-    {
-        log_.debug("set pcs off success");
-    }
+    auto pollResult = pollMessage(requestMessage);
+    if(!pollResult.has_value())
+        log_.debug("set pcs powerOn failed");
+    const vector<uint8_t> repmsg = pollResult.value();
+    if(requestMessage != repmsg)
+        log_.debug("set pcs powerOn recv msg err");
 }
 
 void Controler::setActivePower(const string& status, const double power)
@@ -140,12 +135,12 @@ void Controler::setActivePower(const string& status, const double power)
         }
     }
 
-    vector<uint8_t> respondMessage;
-    if(!pollMessage(requestMessage, respondMessage))
-    {
-        return;
-    }
-    // log_.debug("strategy command success");
+    auto pollResult = pollMessage(requestMessage);
+    if(!pollResult.has_value())
+        log_.debug("set pcs activePower failed");
+    const vector<uint8_t> repmsg = pollResult.value();
+    if(requestMessage != repmsg)
+        log_.debug("set pcs activePower recv msg err");
 }
 
 void Controler::verifyRemoteMode()
@@ -208,11 +203,12 @@ void Controler::setRemoteMode()
         }
     }
 
-    vector<uint8_t> respondMessage;
-    if(pollMessage(requestMessage, respondMessage))
-    {
-        log_.debug("set remote mode success");
-    }
+    auto pollResult = pollMessage(requestMessage);
+    if(!pollResult.has_value())
+        log_.debug("set pcs remoteMode failed");
+    const vector<uint8_t> repmsg = pollResult.value();
+    if(requestMessage != repmsg)
+        log_.debug("set pcs remoteMode recv msg err");
 }
 
 bool Controler::needOffByPcsFault()

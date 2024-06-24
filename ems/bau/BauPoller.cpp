@@ -78,12 +78,8 @@ void BauPoller::onTimeout(const system::error_code &error)
 
 std::optional<vector<uint8_t>> BauPoller::pollMessage(const vector<uint8_t>& reqmsg)
 {
-    {
-        zmq::message_t delimiter;
-        zmqDealer_.send(delimiter, zmq::send_flags::sndmore);
-        zmq::message_t sndmsg(reqmsg.data(), reqmsg.size());
-        zmqDealer_.send(sndmsg, zmq::send_flags::none);
-    }
+    zmq::message_t sndmsg(reqmsg.data(), reqmsg.size());
+    zmqDealer_.send(sndmsg, zmq::send_flags::none);
     
     zmq::pollitem_t item{ zmqDealer_, 0, ZMQ_POLLIN, 0 };
     const int pollResult = zmq::poll(&item, 1, std::chrono::seconds(1));
@@ -93,13 +89,10 @@ std::optional<vector<uint8_t>> BauPoller::pollMessage(const vector<uint8_t>& req
         return {};
     }
 
-    zmq::message_t delimiter;
-    (void)zmqDealer_.recv(delimiter);
     zmq::message_t rcvmsg;
     (void)zmqDealer_.recv(rcvmsg);
-    const vector<uint8_t> repmsg(reinterpret_cast<uint8_t*>(rcvmsg.data()),
+    return vector<uint8_t>(reinterpret_cast<uint8_t*>(rcvmsg.data()),
                                     reinterpret_cast<uint8_t*>(rcvmsg.data()) + rcvmsg.size());
-    return repmsg;
 }
 
 std::optional<BingjiStatusSummary> BauPoller::doFrameBingjiStatus()

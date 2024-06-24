@@ -80,12 +80,8 @@ void Poller::doWork()
 
 std::optional<vector<uint8_t>> Poller::pollMessage(const vector<uint8_t>& reqmsg)
 {
-    {
-        zmq::message_t delimiter;
-        zmqDealer_.send(delimiter, zmq::send_flags::sndmore);
-        zmq::message_t sndmsg(reqmsg.data(), reqmsg.size());
-        zmqDealer_.send(sndmsg, zmq::send_flags::none);
-    }
+    zmq::message_t sndmsg(reqmsg.data(), reqmsg.size());
+    zmqDealer_.send(sndmsg, zmq::send_flags::none);
     
     zmq::pollitem_t item{ zmqDealer_, 0, ZMQ_POLLIN, 0 };
     const int pollResult = zmq::poll(&item, 1, std::chrono::seconds(1));
@@ -95,13 +91,10 @@ std::optional<vector<uint8_t>> Poller::pollMessage(const vector<uint8_t>& reqmsg
         return {};
     }
 
-    zmq::message_t delimiter;
-    (void)zmqDealer_.recv(delimiter);
     zmq::message_t rcvmsg;
     (void)zmqDealer_.recv(rcvmsg);
-    const vector<uint8_t> repmsg(reinterpret_cast<uint8_t*>(rcvmsg.data()),
-                                    reinterpret_cast<uint8_t*>(rcvmsg.data()) + rcvmsg.size());
-    return repmsg;
+    return vector<uint8_t>(reinterpret_cast<uint8_t*>(rcvmsg.data()),
+                            reinterpret_cast<uint8_t*>(rcvmsg.data()) + rcvmsg.size());
 }
 
 std::optional<_0406_0460_Summary> Poller::doPoll_0406_0460()
@@ -227,9 +220,8 @@ try
     }
     return createSummary_0474_04D0(hostEndianRegisters);
 }
-catch(const std::exception& e)
-{
-    std::cerr << e.what() << '\n';
+catch(const std::exception& e){
+    log_.debugStream() << e.what();
 }
     return {};
 }
