@@ -112,7 +112,7 @@ public:
     uint16_t getPublishPort(){ return publishPort_; }
 private:
     void onTimeout(const boost::system::error_code &error);
-    std::optional<vector<uint8_t>> pollMessage(vector<uint8_t>& reqmsg);
+    std::optional<vector<uint8_t>> pollMessage(const vector<uint8_t>& reqmsg);
 
     std::optional<BingjiStatusSummary> doFrameBingjiStatus();
     BingjiStatusSummary createBingjiStatusSummary(const vector<uint16_t>&);

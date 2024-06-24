@@ -14,7 +14,18 @@ using namespace ems::bau;
 BcuPoller::BcuPoller()
     : log_(ems::Log4cppWrapper::getLogger(3))
     , bcuIndexListOnlineItr_(bcuIndexListOnline_.begin())
+    , zmqDealer_(zmqContext_, zmq::socket_type::dealer)
 {
+    auto& cfgRoot = YamlcppWrapper::getRoot();
+    const auto& collectors = cfgRoot["collector"];
+    auto resultLoad = std::find_if(collectors.begin(), collectors.end(), [](const YAML::Node& item){
+        return item["name"].as<string>() == "BAU";
+    });
+    BOOST_ASSERT(resultLoad != collectors.end());
+    BOOST_ASSERT((*resultLoad)["load"].as<bool>());
+
+    const string proxyAddress = (*resultLoad)["master"]["address"].as<string>();
+    zmqDealer_.connect(proxyAddress);
 }
 
 BcuPoller::BcuPoller(BcuPoller&& other)
@@ -89,44 +100,51 @@ bool BcuPoller::catchFrameBauBauStatus(const string& message)
     return true;
 }
 
-std::optional<vector<uint8_t>> BcuPoller::pollMessage(vector<uint8_t>& requestMessage)
+std::optional<vector<uint8_t>> BcuPoller::pollMessage(const vector<uint8_t>& requestMessage)
 {
-    if(!ZmqRequest_){
-        auto& cfgRoot = YamlcppWrapper::getRoot();
-        const auto& collectors = cfgRoot["collector"];
-        auto resultLoad = std::find_if(collectors.begin(), collectors.end(), [](const YAML::Node& item){
-            return item["name"].as<string>() == "BAU";
-        });
-        BOOST_ASSERT(resultLoad != collectors.end());
-        BOOST_ASSERT((*resultLoad)["load"].as<bool>());
-
-        const string proxyAddress = (*resultLoad)["master"]["address"].as<string>();
-        ZmqRequest_ = make_shared<ZmqRequest>(proxyAddress);
-    }
-
     // 消息序列化
     auto serializedMsg = msgpackWrapper::pack(requestMessage);
     const vector<byte> sendmsg(reinterpret_cast<byte*>(serializedMsg.data()),
                                 reinterpret_cast<byte*>(serializedMsg.data()) + serializedMsg.size());
-    bool sendResult = ZmqRequest_->send(sendmsg);
-    if(!sendResult){
-        log_.error("send failed");
-        return {};
+    {
+        zmq::message_t sndmsg(serializedMsg.data(), serializedMsg.size());
+
+        zmq::message_t delimiter;
+        zmqDealer_.send(delimiter, zmq::send_flags::sndmore);
+        zmqDealer_.send(sndmsg, zmq::send_flags::none);
     }
 
-    // 接收
-    const auto recvResult = ZmqRequest_->recv();
-    if(!recvResult.has_value()){
-        cout << "recv failed" << endl;
-        return {};
-    }
-    const auto recvmsg = recvResult.value();
+    {
+        zmq::message_t delimiter;
+        zmqDealer_.recv(delimiter);
 
-    // 2.2 消息反序列化
-    vector<uint8_t> respondMessage;
-    const bool unserializedResult = msgpackWrapper::unpack(recvmsg.data(), recvmsg.size(), respondMessage);
-    BOOST_ASSERT(unserializedResult);
-    return { respondMessage };
+        zmq::message_t rcvmsg;
+        zmqDealer_.recv(rcvmsg);
+
+        vector<uint8_t> repmsg;
+        msgpackWrapper::unpack(rcvmsg.data(), rcvmsg.size(), repmsg);
+        return repmsg;
+    }
+    return {};
+    // bool sendResult = ZmqRequest_->send(sendmsg);
+    // if(!sendResult){
+    //     log_.error("send failed");
+    //     return {};
+    // }
+
+    // // 接收
+    // const auto recvResult = ZmqRequest_->recv();
+    // if(!recvResult.has_value()){
+    //     cout << "recv failed" << endl;
+    //     return {};
+    // }
+    // const auto recvmsg = recvResult.value();
+
+    // // 2.2 消息反序列化
+    // vector<uint8_t> respondMessage;
+    // const bool unserializedResult = msgpackWrapper::unpack(recvmsg.data(), recvmsg.size(), respondMessage);
+    // BOOST_ASSERT(unserializedResult);
+    // return { respondMessage };
 }
 
 void BcuPoller::doBcu(const uint16_t bcuIndex)

@@ -77,33 +77,13 @@ void BauPoller::onTimeout(const system::error_code &error)
     timer_.async_wait(bind(&BauPoller::onTimeout, this, placeholders::_1));
 }
 
-std::optional<vector<uint8_t>> BauPoller::pollMessage(vector<uint8_t>& reqmsg)
+std::optional<vector<uint8_t>> BauPoller::pollMessage(const vector<uint8_t>& reqmsg)
 {
     // 序列化
     auto serializedMsg = msgpackWrapper::pack(reqmsg);
     // 发送
     const vector<byte> sendmsg(reinterpret_cast<byte*>(serializedMsg.data()),
                                 reinterpret_cast<byte*>(serializedMsg.data()) + serializedMsg.size());
-    // bool sendResult = ZmqRequest_->send(sendmsg);
-    // if(!sendResult){
-    //     log_.error("send failed");
-    //     return {};
-    // }
-
-    // // 接收
-    // const auto recvResult = ZmqRequest_->recv();
-    // if(!recvResult.has_value()){
-    //     log_.error("recv failed");
-    //     return {};
-    // }
-
-    // // 反序列化
-    // const auto recvmsg = recvResult.value();
-    // vector<uint8_t> repmsg;
-    // if(!msgpackWrapper::unpack(recvmsg.data(), recvmsg.size(), repmsg)){
-    //     return {};
-    // }
-
     {
         zmq::message_t sndmsg(serializedMsg.data(), serializedMsg.size());
 

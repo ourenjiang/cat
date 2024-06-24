@@ -76,7 +76,7 @@ public:
 private:
     using Mapping = std::unordered_map<std::string, std::string>;
 
-    std::optional<vector<uint8_t>> pollMessage(vector<uint8_t>& requestMessage);
+    std::optional<vector<uint8_t>> pollMessage(const vector<uint8_t>& requestMessage);
     bool catchFrameBauBauStatus(const std::string&);
     void doBcu(const uint16_t);
     BcuStatusSummary createBcuStatusSummary(const vector<uint16_t>&);
@@ -88,8 +88,9 @@ private:
     int branchIndex_;
     std::string publishAddress_;
     log4cpp::Category& log_;
-    std::shared_ptr<ZmqRequest> ZmqRequest_;
-    // uint16_t pollerCurrentBcuIndex_;
+    // std::shared_ptr<ZmqRequest> ZmqRequest_;
+    zmq::context_t zmqContext_;
+    zmq::socket_t zmqDealer_;
     vector<int> bcuIndexListOnline_;
     vector<int>::iterator bcuIndexListOnlineItr_;
     std::shared_ptr<ZmqSubscribe> bauFrameSubscriber_;
