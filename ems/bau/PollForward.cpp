@@ -10,6 +10,7 @@ using namespace ems::bau;
 
 PollForward::PollForward()
     : log_(ems::Log4cppWrapper::getLogger(1))
+    , zmqSocket_(zmqContext_, zmq::socket_type::router)
 {
     // 启动代理服务
     auto& cfgRoot = YamlcppWrapper::getRoot();
@@ -21,7 +22,8 @@ PollForward::PollForward()
     });
     BOOST_ASSERT(resultLoadBau != collectors.end());
     const string proxyAddress = (*resultLoadBau)["proxy"]["address"].as<string>();
-    zmqRespond_ = make_shared<ZmqRespond>(proxyAddress);
+    // zmqRespond_ = make_shared<ZmqRespond>(proxyAddress);
+    zmqSocket_.bind(proxyAddress);
 
     // 创建'同步请求'客户端
     string ip, port;
@@ -40,31 +42,44 @@ void PollForward::start()
     loopThread_ = thread([this]{
     while(true)
     {
-        const auto zmqRecvResult = zmqRespond_->recv();
-        if(!zmqRecvResult.has_value()) continue;
-        const auto recvmsg = zmqRecvResult.value();
-        
-        vector<uint8_t> requestMessage;
-        const bool unserializedResult = msgpackWrapper::unpack(recvmsg.data(), recvmsg.size(), requestMessage);
-        BOOST_ASSERT(unserializedResult);
+        zmq::message_t identity;
+        zmqSocket_.recv(identity);
+        zmq::message_t delimiter;
+        zmqSocket_.recv(delimiter);
+        zmq::message_t rcvmsg;
+        zmqSocket_.recv(rcvmsg);
 
         //消息代理
-        const string frameStr(requestMessage.begin(), requestMessage.end());
-        syncSocket_->asyncWrite(frameStr);
-        const bool syncSocketRecvResult = syncSocket_->syncReadConditionVariable();
-        if(!syncSocketRecvResult) continue;
-        
-        const string recvBuffer = syncSocket_->gerRecvBuffer();
+        auto pollResult = pollModbusSlave(rcvmsg);
+        if(pollResult.has_value()){
 
-        {
-            vector<uint8_t> respondMessage(recvBuffer.begin(), recvBuffer.end());
-            auto rbuffer = msgpackWrapper::pack(respondMessage);// 序列化
-            const vector<byte> sendmsg(reinterpret_cast<byte*>(rbuffer.data()),
-                                        reinterpret_cast<byte*>(rbuffer.data()) + rbuffer.size());
-            const bool sendResult = zmqRespond_->send(sendmsg);
-            if(!sendResult) continue;
+            const auto& modbusRespond = pollResult.value();
+            auto serializedMsg = msgpackWrapper::pack(modbusRespond);
+            zmq::message_t sndmsg(serializedMsg.data(), serializedMsg.size());
+            zmqSocket_.send(identity, zmq::send_flags::sndmore);
+            zmqSocket_.send(delimiter, zmq::send_flags::sndmore);
+            zmqSocket_.send(sndmsg, zmq::send_flags::none);
+            log_.debug("pollMessage success");
         }
-        // log_.debug("zmsg_recv success");
-        log_.debug("pollMessage success");
+        else{
+            log_.debug("pollMessage failed");
+        }
     }});
+}
+
+optional<vector<byte>> PollForward::pollModbusSlave(const zmq::message_t& msg)
+{
+    // 反序列化
+    vector<uint8_t> requestMessage;
+    const bool unserializedResult = msgpackWrapper::unpack(msg.data(), msg.size(), requestMessage);
+    BOOST_ASSERT(unserializedResult);
+
+    //转发
+    syncSocket_->asyncWrite({ reinterpret_cast<const char*>(requestMessage.data()), requestMessage.size() });
+    const bool syncSocketRecvResult = syncSocket_->syncReadConditionVariable();
+    if(syncSocketRecvResult){
+        const string msg = syncSocket_->gerRecvBuffer();
+        return vector<byte>{ reinterpret_cast<const byte*>(msg.data()), reinterpret_cast<const byte*>(msg.data()) + msg.size() };
+    }
+    return {};
 }

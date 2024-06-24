@@ -19,10 +19,14 @@ public:
     ~PollForward();
     void start();
 private:
+    optional<vector<byte>> pollModbusSlave(const zmq::message_t& msg);
     log4cpp::Category& log_;
-    std::shared_ptr<ZmqRespond> zmqRespond_;
+    // std::shared_ptr<ZmqRespond> zmqRespond_;
+    zmq::context_t zmqContext_;
+    zmq::socket_t zmqSocket_;
     std::shared_ptr<SyncSocketRequest> syncSocket_;
     std::thread loopThread_;
+
 };
 
 }//namespace bau
