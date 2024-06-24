@@ -10,7 +10,7 @@ using namespace ems::bau;
 
 PollForward::PollForward()
     : log_(ems::Log4cppWrapper::getLogger(1))
-    , zmqSocket_(zmqContext_, zmq::socket_type::router)
+    , zmqRouter_(zmqContext_, zmq::socket_type::router)
 {
     // 启动代理服务
     auto& cfgRoot = YamlcppWrapper::getRoot();
@@ -23,7 +23,7 @@ PollForward::PollForward()
     BOOST_ASSERT(resultLoadBau != collectors.end());
     const string proxyAddress = (*resultLoadBau)["proxy"]["address"].as<string>();
     // zmqRespond_ = make_shared<ZmqRespond>(proxyAddress);
-    zmqSocket_.bind(proxyAddress);
+    zmqRouter_.bind(proxyAddress);
 
     // 创建'同步请求'客户端
     string ip, port;
@@ -43,11 +43,11 @@ void PollForward::start()
     while(true)
     {
         zmq::message_t identity;
-        (void)zmqSocket_.recv(identity);
+        (void)zmqRouter_.recv(identity);
         zmq::message_t delimiter;
-        (void)zmqSocket_.recv(delimiter);
+        (void)zmqRouter_.recv(delimiter);
         zmq::message_t rcvmsg;
-        (void)zmqSocket_.recv(rcvmsg);
+        (void)zmqRouter_.recv(rcvmsg);
 
         //消息代理
         auto pollResult = pollModbusSlave(rcvmsg);
@@ -57,9 +57,9 @@ void PollForward::start()
             // auto serializedMsg = msgpackWrapper::pack(modbusRespond);
             // zmq::message_t sndmsg(serializedMsg.data(), serializedMsg.size());
             zmq::message_t sndmsg(modbusRespond.data(), modbusRespond.size());
-            zmqSocket_.send(identity, zmq::send_flags::sndmore);
-            zmqSocket_.send(delimiter, zmq::send_flags::sndmore);
-            zmqSocket_.send(sndmsg, zmq::send_flags::none);
+            zmqRouter_.send(identity, zmq::send_flags::sndmore);
+            zmqRouter_.send(delimiter, zmq::send_flags::sndmore);
+            zmqRouter_.send(sndmsg, zmq::send_flags::none);
             log_.debug("pollMessage success");
         }
         else{
