@@ -63,7 +63,8 @@ public:
 private:
     using Mapping = std::unordered_map<std::string, std::string>;
 
-    bool pollMessage(vector<uint8_t>& requestMessage, vector<uint8_t>& respondMessage);
+    // bool pollMessage(vector<uint8_t>& requestMessage, vector<uint8_t>& respondMessage);
+    std::optional<vector<uint8_t>> pollMessage(const vector<uint8_t>& requestMessage);
     bool catchFrameBauBauStatus(const std::string&);
     std::optional<CellvoltSummary> fetchBmuCellvolt(const uint16_t bcuIndex, const uint16_t bmuIndex, const uint16_t cellvoltNum);
     CellvoltSummary createBmuCellvoltSummary(const vector<uint16_t>&);
@@ -72,7 +73,9 @@ private:
     CelltemSummary createBmuCelltemSummary(const vector<uint16_t>&, const vector<uint16_t>&);
 
     log4cpp::Category& log_;
-    std::shared_ptr<ZmqRequest> ZmqRequest_;
+    // std::shared_ptr<ZmqRequest> ZmqRequest_;
+    zmq::context_t zmqContext_;
+    zmq::socket_t zmqDealer_;
     int pollerCurrentBcuIndex_;
     int pollerCurrentBmuIndex_;
     int branchIndex_;

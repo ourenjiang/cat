@@ -17,7 +17,18 @@ BmuPoller::BmuPoller()
     , pollerCurrentBcuIndex_(0)
     , pollerCurrentBmuIndex_(0)
     , branchIndex_(0)// 应该从配置文件加载
+    , zmqDealer_(zmqContext_, zmq::socket_type::dealer)
 {
+    auto& cfgRoot = YamlcppWrapper::getRoot();
+    const auto& collectors = cfgRoot["collector"];
+    auto resultLoad = std::find_if(collectors.begin(), collectors.end(), [](const YAML::Node& item){
+        return item["name"].as<string>() == "BAU";
+    });
+    BOOST_ASSERT(resultLoad != collectors.end());
+    BOOST_ASSERT((*resultLoad)["load"].as<bool>());
+
+    const string proxyAddress = (*resultLoad)["master"]["address"].as<string>();
+    zmqDealer_.connect(proxyAddress);
 }
 
 BmuPoller::BmuPoller(BmuPoller&& other)
@@ -137,27 +148,26 @@ std::optional<CellvoltSummary> BmuPoller::fetchBmuCellvolt(const uint16_t bcuInd
                                                                 cellvoltNum);
 
     // 获取数据
-    vector<uint8_t> respondMessage;
-    if(!pollMessage(rawMessage, respondMessage)) return {};
-    if(respondMessage.empty()){
-        log_.debug("未接收到有效数据");
-        return {};
+    // vector<uint8_t> respondMessage;
+    // if(!pollMessage(rawMessage, respondMessage)) return {};
+    // if(respondMessage.empty()){
+    //     log_.debug("未接收到有效数据");
+    //     return {};
+    // }
+    auto pollResult = pollMessage(rawMessage);
+    if(!pollResult.has_value()) return {};
+
+    auto& msg = pollResult.value();
+    BOOST_ASSERT(msg.size() > 5);
+    BOOST_ASSERT((msg.size() - 5) % 2 == 0);
+
+    vector<uint16_t> registers;
+    for(size_t i = 3; i < msg.size() - 2; i+= 2){
+        const uint16_t value = static_cast<uint16_t>(msg[i] << 8 | msg[i+1]);
+        registers.push_back(value);
     }
-
-    if(respondMessage.size() > 5){
-
-        uint16_t* ptr = reinterpret_cast<uint16_t*>(respondMessage.data() + 3);
-        vector<uint16_t> registers;
-        for(int i = 0; i < (respondMessage.size() - 5) / sizeof(uint16_t); ++i){
-            miscellaneous::reverseByteArray(ptr + i, sizeof(uint16_t));
-            registers.push_back(*(ptr + i));
-        }
-
-        const string topic{ "Cellvolt" };// 主题名称
-        return createBmuCellvoltSummary(registers);
-        // this->publish(topic, { branchIndex_, bcuIndex, bmuIndex }, parser.getSummary());
-    }
-    return {};
+    BOOST_ASSERT(registers.size() == cellvoltNum);
+    return createBmuCellvoltSummary(registers);
 }
 
 CellvoltSummary BmuPoller::createBmuCellvoltSummary(const vector<uint16_t>& frameRegisters)
@@ -212,37 +222,38 @@ std::optional<CelltemSummary> BmuPoller::fetchBmuCelltem(const uint16_t bcuIndex
                                                                 celltemBeginAddr + bcuOffset + bmuOffset,
                                                                 celltemCapacity + terminaltemNum);
 
-    vector<uint8_t> respondMessage;
-    if(!pollMessage(rawMessage, respondMessage)) return {};
-    if(respondMessage.empty()){
-        log_.debug("未接收到有效数据");
-        return {};
+    // vector<uint8_t> respondMessage;
+    // if(!pollMessage(rawMessage, respondMessage)) return {};
+    // if(respondMessage.empty()){
+    //     log_.debug("未接收到有效数据");
+    //     return {};
+    // }
+    auto pollResult = pollMessage(rawMessage);
+    if(!pollResult.has_value()) return {};
+
+    auto& msg = pollResult.value();
+    BOOST_ASSERT(msg.size() > 5);
+    BOOST_ASSERT((msg.size() - 5) % 2 == 0);
+
+    vector<uint16_t> registers;
+    for(size_t i = 3; i < msg.size() - 2; i+= 2){
+        const uint16_t value = static_cast<uint16_t>(msg[i] << 8 | msg[i+1]);
+        registers.push_back(value);
+    }
+    BOOST_ASSERT(registers.size() == celltemCapacity + terminaltemNum);
+
+    // 截取 { 电芯温度数据块, 端子温度数据块 }
+    std::vector<uint16_t> celltemData, terminaltemData;
+    {
+        auto& allTemData = registers;
+        move(allTemData.begin(), allTemData.begin() + celltemNum, back_inserter(celltemData));
+
+        const uint16_t celltemCapacity{ 64 };
+        std::move(allTemData.begin() + celltemCapacity, allTemData.end(),
+                    std::back_inserter(terminaltemData));
     }
 
-    if(respondMessage.size() > 5){
-
-        uint16_t* ptr = reinterpret_cast<uint16_t*>(respondMessage.data() + 3);
-        vector<uint16_t> registers;
-        for(int i = 0; i < (respondMessage.size() - 5) / sizeof(uint16_t); ++i){
-            miscellaneous::reverseByteArray(ptr + i, sizeof(uint16_t));
-            registers.push_back(*(ptr + i));
-        }
-
-        // 截取 { 电芯温度数据块, 端子温度数据块 }
-        std::vector<uint16_t> celltemData, terminaltemData;
-        {
-            auto& allTemData = registers;
-            move(allTemData.begin(), allTemData.begin() + celltemNum, back_inserter(celltemData));
-
-            const uint16_t celltemCapacity{ 64 };
-            std::move(allTemData.begin() + celltemCapacity, allTemData.end(),
-                        std::back_inserter(terminaltemData));
-        }
-
-        const string topic{ "Celltem" };// 主题名称
-        return createBmuCelltemSummary(celltemData, terminaltemData);
-    }
-    return {};
+    return createBmuCelltemSummary(celltemData, terminaltemData);
 }
 
 CelltemSummary BmuPoller::createBmuCelltemSummary(const vector<uint16_t>& cellTemRegisters, const vector<uint16_t>& terminalTemRegisters)
@@ -290,40 +301,52 @@ CelltemSummary BmuPoller::createBmuCelltemSummary(const vector<uint16_t>& cellTe
     return summary;
 }
 
-bool BmuPoller::pollMessage(vector<uint8_t>& requestMessage, vector<uint8_t>& respondMessage)
+std::optional<vector<uint8_t>> BmuPoller::pollMessage(const vector<uint8_t>& requestMessage)
 {
-    if(!ZmqRequest_){
-        auto& cfgRoot = YamlcppWrapper::getRoot();
-        const auto& collectors = cfgRoot["collector"];
-        auto resultLoad = std::find_if(collectors.begin(), collectors.end(), [](const YAML::Node& item){
-            return item["name"].as<string>() == "BAU";
-        });
-        BOOST_ASSERT(resultLoad != collectors.end());
-        BOOST_ASSERT((*resultLoad)["load"].as<bool>());
+    // // 消息序列化
+    // auto serializedMsg = msgpackWrapper::pack(requestMessage);
+    // const vector<byte> sendmsg(reinterpret_cast<byte*>(serializedMsg.data()),
+    //                             reinterpret_cast<byte*>(serializedMsg.data()) + serializedMsg.size());
+    // bool sendResult = ZmqRequest_->send(sendmsg);
+    // if(!sendResult){
+    //     log_.error("send failed");
+    // }
 
-        const string proxyAddress = (*resultLoad)["master"]["address"].as<string>();
-        ZmqRequest_ = make_shared<ZmqRequest>(proxyAddress);
-    }
+    // // 接收
+    // const auto recvResult = ZmqRequest_->recv();
+    // if(!recvResult.has_value()){
+    //     cout << "recv failed" << endl;
+    //     return false;
+    // }
+    // const auto recvmsg = recvResult.value();
+
+    // // 2.2 消息反序列化
+    // if(!msgpackWrapper::unpack(recvmsg.data(), recvmsg.size(), respondMessage)) return false;
+    // log_.debug("recv success");
+    // return true;
 
     // 消息序列化
     auto serializedMsg = msgpackWrapper::pack(requestMessage);
     const vector<byte> sendmsg(reinterpret_cast<byte*>(serializedMsg.data()),
                                 reinterpret_cast<byte*>(serializedMsg.data()) + serializedMsg.size());
-    bool sendResult = ZmqRequest_->send(sendmsg);
-    if(!sendResult){
-        log_.error("send failed");
+    {
+        zmq::message_t sndmsg(serializedMsg.data(), serializedMsg.size());
+
+        zmq::message_t delimiter;
+        zmqDealer_.send(delimiter, zmq::send_flags::sndmore);
+        zmqDealer_.send(sndmsg, zmq::send_flags::none);
     }
 
-    // 接收
-    const auto recvResult = ZmqRequest_->recv();
-    if(!recvResult.has_value()){
-        cout << "recv failed" << endl;
-        return false;
-    }
-    const auto recvmsg = recvResult.value();
+    {
+        zmq::message_t delimiter;
+        zmqDealer_.recv(delimiter);
 
-    // 2.2 消息反序列化
-    if(!msgpackWrapper::unpack(recvmsg.data(), recvmsg.size(), respondMessage)) return false;
-    log_.debug("recv success");
-    return true;
+        zmq::message_t rcvmsg;
+        zmqDealer_.recv(rcvmsg);
+
+        vector<uint8_t> repmsg;
+        msgpackWrapper::unpack(rcvmsg.data(), rcvmsg.size(), repmsg);
+        return repmsg;
+    }
+    return {};
 }
