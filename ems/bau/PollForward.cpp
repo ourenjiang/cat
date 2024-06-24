@@ -54,8 +54,9 @@ void PollForward::start()
         if(pollResult.has_value()){
 
             const auto& modbusRespond = pollResult.value();
-            auto serializedMsg = msgpackWrapper::pack(modbusRespond);
-            zmq::message_t sndmsg(serializedMsg.data(), serializedMsg.size());
+            // auto serializedMsg = msgpackWrapper::pack(modbusRespond);
+            // zmq::message_t sndmsg(serializedMsg.data(), serializedMsg.size());
+            zmq::message_t sndmsg(modbusRespond.data(), modbusRespond.size());
             zmqSocket_.send(identity, zmq::send_flags::sndmore);
             zmqSocket_.send(delimiter, zmq::send_flags::sndmore);
             zmqSocket_.send(sndmsg, zmq::send_flags::none);
@@ -70,9 +71,11 @@ void PollForward::start()
 optional<vector<byte>> PollForward::pollModbusSlave(const zmq::message_t& msg)
 {
     // 反序列化
-    vector<uint8_t> requestMessage;
-    const bool unserializedResult = msgpackWrapper::unpack(msg.data(), msg.size(), requestMessage);
-    BOOST_ASSERT(unserializedResult);
+    // vector<uint8_t> requestMessage;
+    // const bool unserializedResult = msgpackWrapper::unpack(msg.data(), msg.size(), requestMessage);
+    // BOOST_ASSERT(unserializedResult);
+    vector<uint8_t> requestMessage(reinterpret_cast<const uint8_t*>(msg.data()),
+        reinterpret_cast<const uint8_t*>(msg.data()) + msg.size());
 
     //转发
     syncSocket_->asyncWrite({ reinterpret_cast<const char*>(requestMessage.data()), requestMessage.size() });

@@ -100,14 +100,15 @@ bool BcuPoller::catchFrameBauBauStatus(const string& message)
     return true;
 }
 
-std::optional<vector<uint8_t>> BcuPoller::pollMessage(const vector<uint8_t>& requestMessage)
+std::optional<vector<uint8_t>> BcuPoller::pollMessage(const vector<uint8_t>& reqmsg)
 {
-    // 消息序列化
-    auto serializedMsg = msgpackWrapper::pack(requestMessage);
-    const vector<byte> sendmsg(reinterpret_cast<byte*>(serializedMsg.data()),
-                                reinterpret_cast<byte*>(serializedMsg.data()) + serializedMsg.size());
+    // // 消息序列化
+    // auto serializedMsg = msgpackWrapper::pack(requestMessage);
+    // const vector<byte> sendmsg(reinterpret_cast<byte*>(serializedMsg.data()),
+    //                             reinterpret_cast<byte*>(serializedMsg.data()) + serializedMsg.size());
     {
-        zmq::message_t sndmsg(serializedMsg.data(), serializedMsg.size());
+        // zmq::message_t sndmsg(serializedMsg.data(), serializedMsg.size());
+        zmq::message_t sndmsg(reqmsg.data(), reqmsg.size());
 
         zmq::message_t delimiter;
         zmqDealer_.send(delimiter, zmq::send_flags::sndmore);
@@ -121,30 +122,13 @@ std::optional<vector<uint8_t>> BcuPoller::pollMessage(const vector<uint8_t>& req
         zmq::message_t rcvmsg;
         zmqDealer_.recv(rcvmsg);
 
-        vector<uint8_t> repmsg;
-        msgpackWrapper::unpack(rcvmsg.data(), rcvmsg.size(), repmsg);
+        // vector<uint8_t> repmsg;
+        // msgpackWrapper::unpack(rcvmsg.data(), rcvmsg.size(), repmsg);
+        const vector<uint8_t> repmsg(reinterpret_cast<uint8_t*>(rcvmsg.data()),
+                                        reinterpret_cast<uint8_t*>(rcvmsg.data()) + rcvmsg.size());
         return repmsg;
     }
     return {};
-    // bool sendResult = ZmqRequest_->send(sendmsg);
-    // if(!sendResult){
-    //     log_.error("send failed");
-    //     return {};
-    // }
-
-    // // 接收
-    // const auto recvResult = ZmqRequest_->recv();
-    // if(!recvResult.has_value()){
-    //     cout << "recv failed" << endl;
-    //     return {};
-    // }
-    // const auto recvmsg = recvResult.value();
-
-    // // 2.2 消息反序列化
-    // vector<uint8_t> respondMessage;
-    // const bool unserializedResult = msgpackWrapper::unpack(recvmsg.data(), recvmsg.size(), respondMessage);
-    // BOOST_ASSERT(unserializedResult);
-    // return { respondMessage };
 }
 
 void BcuPoller::doBcu(const uint16_t bcuIndex)

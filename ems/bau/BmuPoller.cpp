@@ -301,7 +301,7 @@ CelltemSummary BmuPoller::createBmuCelltemSummary(const vector<uint16_t>& cellTe
     return summary;
 }
 
-std::optional<vector<uint8_t>> BmuPoller::pollMessage(const vector<uint8_t>& requestMessage)
+std::optional<vector<uint8_t>> BmuPoller::pollMessage(const vector<uint8_t>& reqmsg)
 {
     // // 消息序列化
     // auto serializedMsg = msgpackWrapper::pack(requestMessage);
@@ -325,12 +325,13 @@ std::optional<vector<uint8_t>> BmuPoller::pollMessage(const vector<uint8_t>& req
     // log_.debug("recv success");
     // return true;
 
-    // 消息序列化
-    auto serializedMsg = msgpackWrapper::pack(requestMessage);
-    const vector<byte> sendmsg(reinterpret_cast<byte*>(serializedMsg.data()),
-                                reinterpret_cast<byte*>(serializedMsg.data()) + serializedMsg.size());
+    // // 消息序列化
+    // auto serializedMsg = msgpackWrapper::pack(requestMessage);
+    // const vector<byte> sendmsg(reinterpret_cast<byte*>(serializedMsg.data()),
+    //                             reinterpret_cast<byte*>(serializedMsg.data()) + serializedMsg.size());
     {
-        zmq::message_t sndmsg(serializedMsg.data(), serializedMsg.size());
+        // zmq::message_t sndmsg(serializedMsg.data(), serializedMsg.size());
+        zmq::message_t sndmsg(reqmsg.data(), reqmsg.size());
 
         zmq::message_t delimiter;
         zmqDealer_.send(delimiter, zmq::send_flags::sndmore);
@@ -344,8 +345,10 @@ std::optional<vector<uint8_t>> BmuPoller::pollMessage(const vector<uint8_t>& req
         zmq::message_t rcvmsg;
         zmqDealer_.recv(rcvmsg);
 
-        vector<uint8_t> repmsg;
-        msgpackWrapper::unpack(rcvmsg.data(), rcvmsg.size(), repmsg);
+        // vector<uint8_t> repmsg;
+        // msgpackWrapper::unpack(rcvmsg.data(), rcvmsg.size(), repmsg);
+        const vector<uint8_t> repmsg(reinterpret_cast<uint8_t*>(rcvmsg.data()),
+                                        reinterpret_cast<uint8_t*>(rcvmsg.data()) + rcvmsg.size());
         return repmsg;
     }
     return {};

@@ -79,13 +79,14 @@ void BauPoller::onTimeout(const system::error_code &error)
 
 std::optional<vector<uint8_t>> BauPoller::pollMessage(const vector<uint8_t>& reqmsg)
 {
-    // 序列化
-    auto serializedMsg = msgpackWrapper::pack(reqmsg);
-    // 发送
-    const vector<byte> sendmsg(reinterpret_cast<byte*>(serializedMsg.data()),
-                                reinterpret_cast<byte*>(serializedMsg.data()) + serializedMsg.size());
+    // // 序列化
+    // auto serializedMsg = msgpackWrapper::pack(reqmsg);
+    // // 发送
+    // const vector<byte> sendmsg(reinterpret_cast<byte*>(serializedMsg.data()),
+    //                             reinterpret_cast<byte*>(serializedMsg.data()) + serializedMsg.size());
     {
-        zmq::message_t sndmsg(serializedMsg.data(), serializedMsg.size());
+        // zmq::message_t sndmsg(serializedMsg.data(), serializedMsg.size());
+        zmq::message_t sndmsg(reqmsg.data(), reqmsg.size());
 
         zmq::message_t delimiter;
         zmqDealer_.send(delimiter, zmq::send_flags::sndmore);
@@ -98,8 +99,9 @@ std::optional<vector<uint8_t>> BauPoller::pollMessage(const vector<uint8_t>& req
         zmq::message_t rcvmsg;
         zmqDealer_.recv(rcvmsg);
 
-        vector<uint8_t> repmsg;
-        msgpackWrapper::unpack(rcvmsg.data(), rcvmsg.size(), repmsg);
+        const vector<uint8_t> repmsg(reinterpret_cast<uint8_t*>(rcvmsg.data()),
+                                        reinterpret_cast<uint8_t*>(rcvmsg.data()) + rcvmsg.size());
+        // msgpackWrapper::unpack(rcvmsg.data(), rcvmsg.size(), repmsg);
         return repmsg;
     }
 
