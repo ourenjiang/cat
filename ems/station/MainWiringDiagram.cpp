@@ -306,10 +306,5 @@ vector<byte> MainWiringDiagram::respondCallback(std::shared_ptr<StationInfo> sta
     root["bms"] = MainWiringDiagram::get_bms(bauStatusSummary);
     root["warning"] = MainWiringDiagram::get_warning(bauStatusSummary);
     root["peak"] = MainWiringDiagram::get_peak(bauStatusSummary);
-
-    Json::StreamWriterBuilder builder;
-    builder["indentation"] = "";
-    const string jsonString = Json::writeString(builder, root);
-    return { reinterpret_cast<const byte*>(jsonString.data()),
-                reinterpret_cast<const byte*>(jsonString.data()) + jsonString.size() };
+    return miscellaneous::serializedJsonAsBytes(root);
 }

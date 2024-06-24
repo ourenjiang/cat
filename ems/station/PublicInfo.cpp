@@ -100,10 +100,5 @@ vector<byte> PublicInfo::respondCallback(std::shared_ptr<StationInfo> stationInf
     root["pcsNum"] = to_string(branchList.size());
     root["bcuNum"] = to_string(bauInfo.bauStatusSummary.bcuNum);
     root["bmuNum"] = to_string(bauInfo.bauStatusSummary.bcuSize);
-
-    Json::StreamWriterBuilder builder;
-    builder["indentation"] = "";
-    const string jsonString = Json::writeString(builder, root);
-    return { reinterpret_cast<const byte*>(jsonString.data()),
-                reinterpret_cast<const byte*>(jsonString.data()) + jsonString.size() };
+    return miscellaneous::serializedJsonAsBytes(root);
 }

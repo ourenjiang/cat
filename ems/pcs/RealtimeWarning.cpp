@@ -137,12 +137,7 @@ vector<byte> RealtimeWarning::respondCallback(std::shared_ptr<StationInfo> stati
     faultData["acFanFault"] = to_string(faultStatus.warning2_acFanFault);
     faultData["batteryFault"] = to_string(faultStatus.warning2_batteryFault);
     faultData["ctOrHallOpenCircuitFault"] = to_string(faultStatus.warning2_ctOrHallOpenCircuitFault);
-
-    Json::StreamWriterBuilder builder;
-    builder["indentation"] = "";
-    const string jsonString = Json::writeString(builder, root);
-    return { reinterpret_cast<const byte*>(jsonString.data()),
-                reinterpret_cast<const byte*>(jsonString.data()) + jsonString.size() };
+    return miscellaneous::serializedJsonAsBytes(root);
 }
 
 string RealtimeWarning::getPcsWarningAndFault(std::shared_ptr<StationInfo> stationInfo, const int branchIndex)

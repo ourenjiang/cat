@@ -222,12 +222,7 @@ vector<byte> OperationRecord::respondCallbackGetPageInfo(std::shared_ptr<Station
     root["totalCount"] = to_string(recordCounts);
     root["pageNum"] = to_string(pageNum);
     root["pageSize"] = pageSize;
-
-    Json::StreamWriterBuilder builder;
-    builder["indentation"] = "";
-    const string respondContent = Json::writeString(builder, root);
-    return { reinterpret_cast<const byte*>(respondContent.data()),
-                reinterpret_cast<const byte*>(respondContent.data()) + respondContent.size() };
+    return miscellaneous::serializedJsonAsBytes(root);
 }
 
 void OperationRecord::requestCallbackGetPageInfo(const httplib::Request &req, httplib::Response &res)

@@ -135,9 +135,7 @@ vector<byte> Setting::respondPutCallback(std::shared_ptr<StationInfo> stationInf
 {
     // 这里需要从数据库重新加载这部分记录.
 
-    const string successMsg{ "success" };
-    return { reinterpret_cast<const byte*>(successMsg.data()),
-                reinterpret_cast<const byte*>(successMsg.data()) + successMsg.size() };
+    return miscellaneous::convertStringToBytes("success");
 }
 
 std::string Setting::createTable()

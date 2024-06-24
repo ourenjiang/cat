@@ -160,9 +160,7 @@ vector<byte> TypeList::respondCallbackPost(std::shared_ptr<StationInfo> stationI
     // 重载数据库
 
     // 返回结果
-    const string result{ "success" };
-    return { reinterpret_cast<const byte*>(result.data()),
-            reinterpret_cast<const byte*>(result.data()) + result.size() };
+    return miscellaneous::convertStringToBytes("success");
 }
 
 vector<byte> TypeList::respondCallbackPut(std::shared_ptr<StationInfo> stationInfo, const vector<byte>& msgbody) const
@@ -170,9 +168,7 @@ vector<byte> TypeList::respondCallbackPut(std::shared_ptr<StationInfo> stationIn
     // 这里需要从数据库重新加载这部分记录.
 
     // 返回结果
-    const string result{ "success" };
-    return { reinterpret_cast<const byte*>(result.data()),
-            reinterpret_cast<const byte*>(result.data()) + result.size() };
+    return miscellaneous::convertStringToBytes("success");
 }
 
 void TypeList::requestCallbackGet(const httplib::Request &req, httplib::Response &res)

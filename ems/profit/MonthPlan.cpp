@@ -38,28 +38,21 @@ vector<byte> MonthPlan::respondCallbackPost(std::shared_ptr<StationInfo> station
     // 这里需要从数据库重新加载这部分记录.
 
     // 返回结果
-    const string result{ "success" };
-    return { reinterpret_cast<const byte*>(result.data()),
-            reinterpret_cast<const byte*>(result.data()) + result.size() };
+    return miscellaneous::convertStringToBytes("success");
 }
 
 vector<byte> MonthPlan::respondCallbackDelete(std::shared_ptr<StationInfo> stationInfo, const vector<byte>& msgbody) const
 {
     // 这里需要从数据库重新加载这部分记录.
 
-    const string successMsg{ "success" };
-    return { reinterpret_cast<const byte*>(successMsg.data()),
-                reinterpret_cast<const byte*>(successMsg.data()) + successMsg.size() };    
+    return miscellaneous::convertStringToBytes("success");
 }
 
 vector<byte> MonthPlan::respondCallbackPut(std::shared_ptr<StationInfo> stationInfo, const vector<byte>& msgbody) const
 {
     // 这里需要从数据库重新加载这部分记录.
 
-    // 返回结果
-    const string result{ "success" };
-    return { reinterpret_cast<const byte*>(result.data()),
-            reinterpret_cast<const byte*>(result.data()) + result.size() };
+    return miscellaneous::convertStringToBytes("success");
 }
 
 void MonthPlan::requestCallbackPost(const httplib::Request &req, httplib::Response &res)

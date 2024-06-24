@@ -119,7 +119,5 @@ vector<byte> Setting::respondCallback(std::shared_ptr<StationInfo> stationInfo, 
 
 
     // 返回结果
-    const string result{ "success" };
-    return { reinterpret_cast<const byte*>(result.data()),
-            reinterpret_cast<const byte*>(result.data()) + result.size() };
+    return miscellaneous::convertStringToBytes("success");
 }

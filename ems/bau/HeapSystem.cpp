@@ -30,7 +30,7 @@ try
     if(!req.has_param("index"))
         throw std::runtime_error("request params err");
     
-    tuple<string> workParams{ req.get_param_value("index") };
+    const string workParams{ req.get_param_value("index") };
 
     // 准备请求参数
     auto serializedMsg = msgpackWrapper::pack(workParams);
@@ -166,9 +166,9 @@ string HeapSystem::convertCellAddrFormat(const uint16_t cellGlobalIndex)  const
 
 vector<byte> HeapSystem::respondCallback(std::shared_ptr<StationInfo> stationInfo, const vector<byte>& msgbody) const
 {
-    tuple<string> reqbody;
+    string reqbody;
     const bool unpackResult = msgpackWrapper::unpack(msgbody.data(), msgbody.size(), reqbody);
-    auto& [branchIndex] = reqbody;
+    const string branchIndex = reqbody;
 
     auto& branchList = stationInfo->branchList;
     auto branchItr = branchList.find(std::stoi(branchIndex));
@@ -184,12 +184,7 @@ vector<byte> HeapSystem::respondCallback(std::shared_ptr<StationInfo> stationInf
     root["branch"] = get_bcu(bauInfo.bcuList);
     root["warning"] = get_warning(bauInfo.bauStatusSummary);
     root["peak"] = get_peak(bauInfo.bauStatusSummary);
-
-    Json::StreamWriterBuilder builder;
-    builder["indentation"] = "";
-    const string jsonString = Json::writeString(builder, root);
-    return { reinterpret_cast<const byte*>(jsonString.data()),
-                reinterpret_cast<const byte*>(jsonString.data()) + jsonString.size() };
+    return miscellaneous::serializedJsonAsBytes(root);
 }
 
 Json::Value HeapSystem::get_peak(const BauStatusSummary& bauStatusSummary) const

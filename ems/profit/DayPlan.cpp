@@ -38,9 +38,7 @@ vector<byte> DayPlan::respondCallbackPost(std::shared_ptr<StationInfo> stationIn
     // 这里需要从数据库重新加载这部分记录.
 
     // 返回结果
-    const string result{ "success" };
-    return { reinterpret_cast<const byte*>(result.data()),
-            reinterpret_cast<const byte*>(result.data()) + result.size() };
+    return miscellaneous::convertStringToBytes("success");
 }
 
 vector<byte> DayPlan::respondCallbackPut(std::shared_ptr<StationInfo> stationInfo, const vector<byte>& msgbody) const
@@ -48,9 +46,7 @@ vector<byte> DayPlan::respondCallbackPut(std::shared_ptr<StationInfo> stationInf
     // 需要重新加载
 
     // 返回结果
-    const string result{ "success" };
-    return { reinterpret_cast<const byte*>(result.data()),
-            reinterpret_cast<const byte*>(result.data()) + result.size() };
+    return miscellaneous::convertStringToBytes("success");
 }
 
 vector<byte> DayPlan::respondCallbackDelete(std::shared_ptr<StationInfo> stationInfo, const vector<byte>& msgbody) const
@@ -59,10 +55,7 @@ vector<byte> DayPlan::respondCallbackDelete(std::shared_ptr<StationInfo> station
     const bool unpackResult = msgpackWrapper::unpack(msgbody.data(), msgbody.size(), name);
 
     // 重新加载数据库
-    
-    const string successMsg{ "success" };
-    return { reinterpret_cast<const byte*>(successMsg.data()),
-                reinterpret_cast<const byte*>(successMsg.data()) + successMsg.size() };                        
+    return miscellaneous::convertStringToBytes("success");
 }
 
 void DayPlan::requestCallbackPost(const httplib::Request &req, httplib::Response &res)

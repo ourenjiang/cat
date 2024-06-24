@@ -314,9 +314,7 @@ catch(const std::exception& e){
 vector<byte> DayPlanDuration::respondCallbackDelete(std::shared_ptr<StationInfo> stationInfo, const vector<byte>& msgbody) const
 {
     // 返回结果
-    const string result{ "success" };
-    return { reinterpret_cast<const byte*>(result.data()),
-            reinterpret_cast<const byte*>(result.data()) + result.size() };
+    return miscellaneous::convertStringToBytes("success");
 }
 
 vector<byte> DayPlanDuration::respondCallbackPost(std::shared_ptr<StationInfo> stationInfo, const vector<byte>& msgbody) const
@@ -324,9 +322,7 @@ vector<byte> DayPlanDuration::respondCallbackPost(std::shared_ptr<StationInfo> s
     // 重载数据库
 
     // 返回结果
-    const string result{ "success" };
-    return { reinterpret_cast<const byte*>(result.data()),
-            reinterpret_cast<const byte*>(result.data()) + result.size() };
+    return miscellaneous::convertStringToBytes("success");
 }
 
 vector<byte> DayPlanDuration::respondCallbackPut(std::shared_ptr<StationInfo> stationInfo, const vector<byte>& msgbody) const
@@ -364,9 +360,7 @@ vector<byte> DayPlanDuration::respondCallbackPut(std::shared_ptr<StationInfo> st
     // }
 
     // 返回结果
-    const string result{ "success" };
-    return { reinterpret_cast<const byte*>(result.data()),
-            reinterpret_cast<const byte*>(result.data()) + result.size() };
+    return miscellaneous::convertStringToBytes("success");
 }
 
 optional<string> DayPlanDuration::request(const string& reqmsg)

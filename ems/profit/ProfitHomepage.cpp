@@ -123,9 +123,5 @@ vector<byte> Profit::respondCallback(std::shared_ptr<StationInfo> stationInfo, c
         root["realPower"].append(obj);
     }
 
-    Json::StreamWriterBuilder builder;
-    builder["indentation"] = "";
-    const string jsonString = Json::writeString(builder, root);
-    return { reinterpret_cast<const byte*>(jsonString.data()),
-                reinterpret_cast<const byte*>(jsonString.data()) + jsonString.size() };
+    return miscellaneous::serializedJsonAsBytes(root);
 }

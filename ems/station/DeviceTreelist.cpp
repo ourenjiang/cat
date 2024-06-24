@@ -92,12 +92,5 @@ vector<byte> DeviceTreeList::respondCallback(std::shared_ptr<StationInfo> statio
         branchData["pcs"]["status"] = branchInfo->pcsInfo.onlineFlag ? "online" : "offline";
         root["branch"].append(branchData);
     }
-
-    // json序列化
-    Json::StreamWriterBuilder builder;
-    builder["indentation"] = "";
-    const string respondMessage = Json::writeString(builder, root);
-    const vector<byte> sendmsg(reinterpret_cast<const byte*>(respondMessage.data()),
-                                reinterpret_cast<const byte*>(respondMessage.data()) + respondMessage.size());
-    return sendmsg;
+    return miscellaneous::serializedJsonAsBytes(root);
 }

@@ -336,10 +336,5 @@ vector<byte> StorageEnergySystem::respondCallback(std::shared_ptr<StationInfo> s
     const auto& pcs_frame_0406_0460_summary = branchInfo->pcsInfo.frame_0406_0460_summary;
     root["warning"] = StorageEnergySystem::get_warning(bauStatusSummary, pcs_frame_0406_0460_summary);
     root["peak"] = StorageEnergySystem::get_peak(bauStatusSummary);
-
-    Json::StreamWriterBuilder builder;
-    builder["indentation"] = "";
-    const string jsonString = Json::writeString(builder, root);
-    return { reinterpret_cast<const byte*>(jsonString.data()),
-                reinterpret_cast<const byte*>(jsonString.data()) + jsonString.size() };
+    return miscellaneous::serializedJsonAsBytes(root);
 }

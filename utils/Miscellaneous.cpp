@@ -317,6 +317,21 @@ vector<byte> ems::miscellaneous::createRespondMessage(const bool status, const v
     return bytes;
 }
 
+vector<byte> ems::miscellaneous::serializedJsonAsBytes(const Json::Value& data)
+{
+    Json::StreamWriterBuilder builder;
+    // builder["indentation"] = "";
+    const string jsonString = Json::writeString(builder, data);
+    return { reinterpret_cast<const byte*>(jsonString.data()),
+                reinterpret_cast<const byte*>(jsonString.data()) + jsonString.size() };
+}
+
+vector<byte> ems::miscellaneous::convertStringToBytes(const string& data)
+{
+    return { reinterpret_cast<const byte*>(data.data()),
+            reinterpret_cast<const byte*>(data.data()) + data.size() };
+}
+
 AssertUserPriority::AssertUserPriority()
 {
     const uid_t rootUid{0};

@@ -115,11 +115,7 @@ vector<byte> HistoryWarning::respondCallbackGet(std::shared_ptr<StationInfo> sta
         node["processed"] = std::get<5>(item);
         root.append(node);
     }
-    Json::StreamWriterBuilder builder;
-    builder["indentation"] = "";
-    const string respondMessage = Json::writeString(builder, root);
-    return {reinterpret_cast<const byte*>(respondMessage.data()),
-            reinterpret_cast<const byte*>(respondMessage.data()) + respondMessage.size() };
+    return miscellaneous::serializedJsonAsBytes(root);
 }
 
 vector<byte> HistoryWarning::respondCallbackGetPageInfo(std::shared_ptr<StationInfo> stationInfo, const vector<byte>& msgbody) const
@@ -135,12 +131,7 @@ vector<byte> HistoryWarning::respondCallbackGetPageInfo(std::shared_ptr<StationI
     root["totalCount"] = std::get<0>(getResult);
     root["pageNum"] = std::get<1>(getResult);
     root["pageSize"] = std::get<2>(getResult);
-    
-    Json::StreamWriterBuilder builder;
-    builder["indentation"] = "";
-    const string respondMessage = Json::writeString(builder, root);
-    return { reinterpret_cast<const byte*>(respondMessage.data()),
-                reinterpret_cast<const byte*>(respondMessage.data()) + respondMessage.size() };
+    return miscellaneous::serializedJsonAsBytes(root);
 }
 
 vector<byte> HistoryWarning::respondCallbackGetWarningDeviceTree(std::shared_ptr<StationInfo> stationInfo, const vector<byte>& msgbody)
@@ -173,12 +164,7 @@ vector<byte> HistoryWarning::respondCallbackGetWarningDeviceTree(std::shared_ptr
         }
         root.append(branchData);
     }
-
-    Json::StreamWriterBuilder builder;
-    builder["indentation"] = "";
-    const string contentString = Json::writeString(builder, root);
-    return { reinterpret_cast<const byte*>(contentString.data()),
-            reinterpret_cast<const byte*>(contentString.data()) + contentString.size() };
+    return miscellaneous::serializedJsonAsBytes(root);
 }
 
 void HistoryWarning::requestCallbackGetPageInfo(const httplib::Request &req, httplib::Response &res)

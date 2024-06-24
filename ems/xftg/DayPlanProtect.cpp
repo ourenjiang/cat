@@ -528,27 +528,21 @@ vector<byte> DayPlanProtect::respondCallbackDelete(std::shared_ptr<StationInfo> 
 {
     // 这里需要从数据库重新加载这部分记录.
 
-    const string successMsg{ "success" };
-    return { reinterpret_cast<const byte*>(successMsg.data()),
-                reinterpret_cast<const byte*>(successMsg.data()) + successMsg.size() };    
+    return miscellaneous::convertStringToBytes("success");
 }
 
 vector<byte> DayPlanProtect::respondCallbackPost(std::shared_ptr<StationInfo> stationInfo, const vector<byte>& msgbody) const
 {
     // 这里需要从数据库重新加载这部分记录.
 
-    const string successMsg{ "success" };
-    return { reinterpret_cast<const byte*>(successMsg.data()),
-                reinterpret_cast<const byte*>(successMsg.data()) + successMsg.size() };    
+    return miscellaneous::convertStringToBytes("success");
 }
 
 vector<byte> DayPlanProtect::respondCallbackPut(std::shared_ptr<StationInfo> stationInfo, const vector<byte>& msgbody) const
 {
     // 这里需要从数据库重新加载这部分记录.
 
-    const string successMsg{ "success" };
-    return { reinterpret_cast<const byte*>(successMsg.data()),
-                reinterpret_cast<const byte*>(successMsg.data()) + successMsg.size() };    
+    return miscellaneous::convertStringToBytes("success");
 }
 
 std::optional<map<string, DayPlanProtect::Record>> DayPlanProtect::getAllRecord()

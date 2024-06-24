@@ -216,12 +216,7 @@ vector<byte> RealtimeWarning::respondCallbackBcu(std::shared_ptr<StationInfo> st
     faultData["samplingBoardCommFault"] = to_string(faultStatus.samplingBoardCommFault);
     faultData["curDiverterFault"] = to_string(faultStatus.curDiverterFault);
     faultData["ntcFault"] = to_string(faultStatus.ntcFault);
-
-    Json::StreamWriterBuilder builder;
-    builder["indentation"] = "";
-    const string jsonString = Json::writeString(builder, root);
-    return { reinterpret_cast<const byte*>(jsonString.data()),
-                reinterpret_cast<const byte*>(jsonString.data()) + jsonString.size() };
+    return miscellaneous::serializedJsonAsBytes(root);
 }
 
 vector<byte> RealtimeWarning::respondCallbackBau(std::shared_ptr<StationInfo> stationInfo, const vector<byte>& msgbody)

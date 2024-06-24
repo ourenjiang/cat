@@ -52,6 +52,10 @@ Json::Value unserializedJson(const string& jsonstring);
 string createFixedSizeString(const string& content, const size_t len = 64);
 // 构造响应消息
 vector<byte> createRespondMessage(const bool status, const vector<byte>& content);
+// 序列化JSON对象为字节流
+vector<byte> serializedJsonAsBytes(const Json::Value& data);
+// 字符串类型转换为字节流类型
+vector<byte> convertStringToBytes(const string& data);
 
 // 强制ROOT权限
 class AssertUserPriority
