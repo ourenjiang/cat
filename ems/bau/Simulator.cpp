@@ -87,7 +87,7 @@ void Simulator::create_bauStatus()
     }
     {
         uint16_t* registerNumPtr = reinterpret_cast<uint16_t*>(&requestFrame[4]);
-        *registerNumPtr = 0x0350 - 0x0300 + 1;
+        *registerNumPtr = 0x0352 - 0x0300 + 1;
         miscellaneous::reverseByteArray(registerNumPtr, sizeof(uint16_t));
     }
     {
@@ -96,10 +96,10 @@ void Simulator::create_bauStatus()
     }
 
     // 创建响应帧
-    vector<uint8_t> respondFrame(5 + sizeof(uint16_t) * (0x0350 - 0x0300 + 1));
+    vector<uint8_t> respondFrame(5 + sizeof(uint16_t) * (0x0352 - 0x0300 + 1));
     respondFrame[0] = 0x01;
     respondFrame[1] = 0x03;
-    respondFrame[2] = 2 + sizeof(uint16_t) * (0x0350 - 0x0300 + 1);
+    respondFrame[2] = 2 + sizeof(uint16_t) * (0x0352 - 0x0300 + 1);
     {
         uint16_t crc16Modbus = miscellaneous::getCrc16Modbus(respondFrame.data(), 
                                                                 respondFrame.size() - sizeof(uint16_t));
@@ -155,6 +155,14 @@ void Simulator::create_bauStatus()
         uint16_t* realDataPtr = reinterpret_cast<uint16_t*>(dataPtr);
         *realDataPtr = 1;// 1个端子温度
         miscellaneous::reverseByteArray(realDataPtr, sizeof(uint16_t));
+    }
+    {
+        // BCU在线映射
+        uint8_t* dataPtr = respondFrame.data() + 3;
+        dataPtr += (0x0351 - 0x0300) * sizeof(uint16_t);
+        uint32_t* realDataPtr = reinterpret_cast<uint32_t*>(dataPtr);
+        *realDataPtr = 1;// 1个BCU
+        miscellaneous::reverseByteArray(realDataPtr, sizeof(uint32_t));
     }
 
     insertCommunicateInstance(requestFrame, respondFrame);
