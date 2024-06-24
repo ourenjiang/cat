@@ -14,6 +14,7 @@ using namespace ems::pcs;
 Poller::Poller()
     : log_(ems::Log4cppWrapper::getLogger(4))
     , timer_(io_service_, asio::chrono::milliseconds(1000))
+    , zmqDealer_(zmqContext_, zmq::socket_type::dealer)
 {
     {
         auto& cfgRoot = YamlcppWrapper::getRoot();
@@ -25,7 +26,7 @@ Poller::Poller()
         BOOST_ASSERT((*resultLoad)["load"].as<bool>());
 
         const string proxyAddress = (*resultLoad)["master"]["address"].as<string>();
-        requester_ = make_unique<ZmqRequest>(proxyAddress);
+        zmqDealer_.connect(proxyAddress);
     }
 }
 
@@ -77,55 +78,61 @@ void Poller::doWork()
     }
 }
 
-bool Poller::pollMessage(vector<uint8_t>& requestMessage, vector<uint8_t> &respondMessage)
+std::optional<vector<uint8_t>> Poller::pollMessage(const vector<uint8_t>& reqmsg)
 {
-    // 消息序列化
-    auto serializedMsg = msgpackWrapper::pack(requestMessage);
-    const vector<byte> sendmsg(reinterpret_cast<byte*>(serializedMsg.data()),
-                                reinterpret_cast<byte*>(serializedMsg.data()) + serializedMsg.size());
-    bool sendResult = requester_->send(sendmsg);
-    if(!sendResult)
-        log_.error("send failed");
-
-    // 接收
-    const auto recvResult = requester_->recv();
-    if(!recvResult.has_value()){
-        cout << "recv failed" << endl;
-        return false;
-    }
-    const auto recvmsg = recvResult.value();
-
-    // 2.2 消息反序列化
-    if(!msgpackWrapper::unpack(recvmsg.data(), recvmsg.size(), respondMessage))
     {
-        return false;
+        zmq::message_t delimiter;
+        zmqDealer_.send(delimiter, zmq::send_flags::sndmore);
+        zmq::message_t sndmsg(reqmsg.data(), reqmsg.size());
+        zmqDealer_.send(sndmsg, zmq::send_flags::none);
     }
-    log_.debug("recv success");
-    return true;
+    
+    zmq::pollitem_t item{ zmqDealer_, 0, ZMQ_POLLIN, 0 };
+    const int pollResult = zmq::poll(&item, 1, std::chrono::seconds(1));
+    BOOST_ASSERT(pollResult == 0 || pollResult == 1);
+    if(pollResult == 0){
+        log_.errorStream() << "recv timeout";
+        return {};
+    }
+
+    zmq::message_t delimiter;
+    (void)zmqDealer_.recv(delimiter);
+    zmq::message_t rcvmsg;
+    (void)zmqDealer_.recv(rcvmsg);
+    const vector<uint8_t> repmsg(reinterpret_cast<uint8_t*>(rcvmsg.data()),
+                                    reinterpret_cast<uint8_t*>(rcvmsg.data()) + rcvmsg.size());
+    return repmsg;
 }
 
 std::optional<_0406_0460_Summary> Poller::doPoll_0406_0460()
 {
-    auto rawMessage = miscellaneous::createModbusRtuReadFrame(0x01, 0x03, 0x0406, 0x0460 - 0x0406 + 1);
+try
+{
+    const uint16_t requestRegisterNum{ 0x0460 - 0x0406 + 1 };
+    auto rawMessage = miscellaneous::createModbusRtuReadFrame(0x01, 0x03, 0x0406, requestRegisterNum);
 
     vector<uint8_t> respondMessage;
-    if(!pollMessage(rawMessage, respondMessage)) return {};
-    if(respondMessage.empty())
-    {
-        log_.debug("未接收到有效数据");
-        return {};
-    }
+    auto pollResult = pollMessage(rawMessage);
+    if(!pollResult.has_value())
+        throw std::logic_error("未接收到有效数据");
+    const vector<uint8_t> repmsg = pollResult.value();
 
-    if(respondMessage.size() > 5){
+    uint16_t rawRegistersNum = (repmsg.size() - 5) / sizeof(uint16_t);
+    if(rawRegistersNum != requestRegisterNum)
+        throw std::logic_error("数据格式错误");
 
-        uint16_t* ptr = reinterpret_cast<uint16_t*>(respondMessage.data() + 3);
-        vector<uint16_t> registers;
-        for(int i = 0; i < (respondMessage.size() - 5) / sizeof(uint16_t); ++i){
-            miscellaneous::reverseByteArray(ptr + i, sizeof(uint16_t));
-            registers.push_back(*(ptr + i));
-        }
-        return createSummary_0406_0460(registers);
+    vector<uint16_t> rawRegisters(rawRegistersNum);
+    ::memcpy(rawRegisters.data(), repmsg.data() + 3, repmsg.size() - 5);
+    vector<uint16_t> hostEndianRegisters;
+    for(auto itr = rawRegisters.begin(); itr != rawRegisters.end(); itr++){
+        const uint16_t hostEndianData = be16toh(*itr);
+        hostEndianRegisters.push_back(hostEndianData);
     }
+    return createSummary_0406_0460(hostEndianRegisters);
+}
+catch(const std::exception& e){
+    log_.debugStream() << e.what();
+}
     return {};
 }
 
@@ -198,29 +205,32 @@ _0406_0460_Summary Poller::createSummary_0406_0460(const vector<uint16_t>& frame
 
 std::optional<_0474_04D0_Summary> Poller::doPoll_0474_04D0()
 {
-    auto rawMessage = miscellaneous::createModbusRtuReadFrame(0x01, 0x03, 0x0474, 0x04D0 - 0x0474 + 1);
+try
+{
+    const uint16_t requestRegisterNum{ 0x04D0 - 0x0474 + 1 };
+    auto reqmsg = miscellaneous::createModbusRtuReadFrame(0x01, 0x03, 0x0474, requestRegisterNum);
+    auto pollResult = pollMessage(reqmsg);
+    if(!pollResult.has_value())
+        throw std::logic_error("未接收到有效数据");
+    const vector<uint8_t> repmsg = pollResult.value();
+    uint16_t rawRegistersNum = (repmsg.size() - 5) / sizeof(uint16_t);
+    if(rawRegistersNum != requestRegisterNum)
+        throw std::logic_error("数据格式错误");
 
-    vector<uint8_t> respondMessage;
-    if(!pollMessage(rawMessage, respondMessage)) return {};
-    if(respondMessage.empty()){
-        log_.debug("未接收到有效数据");
-        return {};
+    vector<uint16_t> rawRegisters(rawRegistersNum);
+    ::memcpy(rawRegisters.data(), repmsg.data() + 3, repmsg.size() - 5);
+
+    vector<uint16_t> hostEndianRegisters;
+    for(auto itr = rawRegisters.begin(); itr != rawRegisters.end(); itr++){
+        const uint16_t hostEndianData = be16toh(*itr);
+        hostEndianRegisters.push_back(hostEndianData);
     }
-
-    BOOST_ASSERT(respondMessage.size() > 5);
-    BOOST_ASSERT((respondMessage.size() - 5) % 2 == 0);
-
-    if(respondMessage.size() > 5){
-
-        uint16_t* ptr = reinterpret_cast<uint16_t*>(respondMessage.data() + 3);
-        vector<uint16_t> registers;
-        for(int i = 0; i < (respondMessage.size() - 5) / sizeof(uint16_t); ++i){
-            registers.push_back(*(ptr + i));
-        }
-
-        const string topic{ "Pcs_0474_04D0" };// 主题名称
-        return createSummary_0474_04D0(registers);
-    }
+    return createSummary_0474_04D0(hostEndianRegisters);
+}
+catch(const std::exception& e)
+{
+    std::cerr << e.what() << '\n';
+}
     return {};
 }
 

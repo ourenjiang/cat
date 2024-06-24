@@ -22,7 +22,6 @@ PollForward::PollForward()
     });
     BOOST_ASSERT(resultLoadBau != collectors.end());
     const string proxyAddress = (*resultLoadBau)["proxy"]["address"].as<string>();
-    // zmqRespond_ = make_shared<ZmqRespond>(proxyAddress);
     zmqRouter_.bind(proxyAddress);
 
     // 创建'同步请求'客户端
@@ -70,10 +69,6 @@ void PollForward::start()
 
 optional<vector<byte>> PollForward::pollModbusSlave(const zmq::message_t& msg)
 {
-    // 反序列化
-    // vector<uint8_t> requestMessage;
-    // const bool unserializedResult = msgpackWrapper::unpack(msg.data(), msg.size(), requestMessage);
-    // BOOST_ASSERT(unserializedResult);
     vector<uint8_t> requestMessage(reinterpret_cast<const uint8_t*>(msg.data()),
         reinterpret_cast<const uint8_t*>(msg.data()) + msg.size());
 

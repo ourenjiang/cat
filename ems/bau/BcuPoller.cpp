@@ -128,31 +128,37 @@ std::optional<vector<uint8_t>> BcuPoller::pollMessage(const vector<uint8_t>& req
 
 void BcuPoller::doBcu(const uint16_t bcuIndex)
 {
+try
+{
     const uint16_t bcuBeginAddr{ 0x0300 };
     const uint16_t bcuCapacity{ 0x0100 };
     const uint16_t bcuOffset{ static_cast<uint16_t>(bcuIndex * bcuCapacity) };
 
+    const uint16_t requestRegisterNum{ 0x034A - 0x0300 + 1 };
     auto rawMessage = miscellaneous::createModbusRtuReadFrame(0x01, 0x04, 
                                             bcuBeginAddr + bcuOffset,
-                                            0x034A - 0x0300 + 1);
+                                            requestRegisterNum);
 
     auto pollResult = pollMessage(rawMessage);
-    if(!pollResult.has_value()) return;
+    if(!pollResult.has_value())
+        throw std::logic_error("未接收到有效数据");
+    const vector<uint8_t> repmsg = pollResult.value();
 
-    auto& msg = pollResult.value();
-    BOOST_ASSERT(msg.size() > 5);
-    BOOST_ASSERT((msg.size() - 5) % 2 == 0);
+    uint16_t rawRegistersNum = (repmsg.size() - 5) / sizeof(uint16_t);
+    if(rawRegistersNum != requestRegisterNum)
+        throw std::logic_error("数据格式错误");
 
-    vector<uint16_t> registers;
-    for(size_t i = 3; i < msg.size() - 2; i+= 2){
-        const uint16_t value = static_cast<uint16_t>(msg[i] << 8 | msg[i+1]);
-        registers.push_back(value);
+    vector<uint16_t> rawRegisters(rawRegistersNum);
+    ::memcpy(rawRegisters.data(), repmsg.data() + 3, repmsg.size() - 5);
+    vector<uint16_t> hostEndianRegisters;
+    for(auto itr = rawRegisters.begin(); itr != rawRegisters.end(); itr++){
+        const uint16_t hostEndianData = be16toh(*itr);
+        hostEndianRegisters.push_back(hostEndianData);
     }
-    BOOST_ASSERT(registers.size() == 0x034A - 0x0300 + 1);
-
+    auto summary = createBcuStatusSummary(hostEndianRegisters);
+    
     const string topic{ "BcuStatus" };// 主题名称
     tuple<int, int> location{ branchIndex_, bcuIndex };
-    auto summary = createBcuStatusSummary(registers);
     {
         string msg;
         std::copy(topic.data(), topic.data() + topic.size(), std::back_inserter(msg));
@@ -164,6 +170,10 @@ void BcuPoller::doBcu(const uint16_t bcuIndex)
         if(!bcuFramePublisher_->send(msg.data(), msg.size()))
             log_.debugStream() << topic << " publish failed";
     }
+}
+catch(const std::exception& e){
+    log_.debugStream() << e.what();
+}
 }
 
 BcuStatusSummary BcuPoller::createBcuStatusSummary(const vector<uint16_t>& frameRegisters)

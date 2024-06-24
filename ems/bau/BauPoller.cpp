@@ -28,7 +28,6 @@ BauPoller::BauPoller()
         BOOST_ASSERT((*resultLoad)["load"].as<bool>());
 
         const string proxyAddress = (*resultLoad)["master"]["address"].as<string>();
-        // ZmqRequest_ = make_shared<ZmqRequest>(proxyAddress);
         zmqDealer_.connect(proxyAddress);
     }
 }
@@ -110,25 +109,22 @@ try
     const uint16_t requestRegisterNum{ 0x0241 - 0x0200 + 1 };
     auto reqmsg = miscellaneous::createModbusRtuReadFrame(0x01, 0x03, 0x0200, requestRegisterNum);
     auto pollResult = pollMessage(reqmsg);
-    if(!pollResult.has_value()){
+    if(!pollResult.has_value())
         throw std::logic_error("未接收到有效数据");
-    }
     const vector<uint8_t> repmsg = pollResult.value();
-
     uint16_t rawRegistersNum = (repmsg.size() - 5) / sizeof(uint16_t);
-    if(rawRegistersNum != requestRegisterNum){
+    if(rawRegistersNum != requestRegisterNum)
         throw std::logic_error("数据格式错误");
-    }
 
     vector<uint16_t> rawRegisters(rawRegistersNum);
     ::memcpy(rawRegisters.data(), repmsg.data() + 3, repmsg.size() - 5);
 
-    vector<uint16_t> bigEndianRegisters;
+    vector<uint16_t> hostEndianRegisters;
     for(auto itr = rawRegisters.begin(); itr != rawRegisters.end(); itr++){
-        const uint16_t bigEndianData = htobe16(*itr);
-        bigEndianRegisters.push_back(bigEndianData);
+        const uint16_t hostEndianData = be16toh(*itr);
+        hostEndianRegisters.push_back(hostEndianData);
     }
-    return createBingjiStatusSummary(bigEndianRegisters);
+    return createBingjiStatusSummary(hostEndianRegisters);
 }
 catch(const std::exception& e){
     log_.debugStream() << e.what();
@@ -194,12 +190,12 @@ try
     vector<uint16_t> rawRegisters(rawRegistersNum);
     ::memcpy(rawRegisters.data(), repmsg.data() + 3, repmsg.size() - 5);
 
-    vector<uint16_t> bigEndianRegisters;
+    vector<uint16_t> hostEndianRegisters;
     for(auto itr = rawRegisters.begin(); itr != rawRegisters.end(); itr++){
-        const uint16_t bigEndianData = htobe16(*itr);
-        bigEndianRegisters.push_back(bigEndianData);
+        const uint16_t hostEndianData = htobe16(*itr);
+        hostEndianRegisters.push_back(hostEndianData);
     }
-    return createBauStatusSummary(bigEndianRegisters);
+    return createBauStatusSummary(hostEndianRegisters);
 }
 catch(const std::exception& e){
     log_.debugStream() << e.what();

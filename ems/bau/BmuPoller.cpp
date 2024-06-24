@@ -136,6 +136,8 @@ bool BmuPoller::catchFrameBauBauStatus(const string& message)
 
 std::optional<CellvoltSummary> BmuPoller::fetchBmuCellvolt(const uint16_t bcuIndex, const uint16_t bmuIndex, const uint16_t cellvoltNum)
 {
+try
+{
     const uint16_t cellvoltBeginAddr{ 0x0700 };
     const uint16_t bcuCapacity{ 20 };
     const uint16_t cellvoltCapacity{ 64 };
@@ -147,27 +149,28 @@ std::optional<CellvoltSummary> BmuPoller::fetchBmuCellvolt(const uint16_t bcuInd
                                                                 cellvoltBeginAddr + bcuOffset + bmuOffset,
                                                                 cellvoltNum);
 
-    // 获取数据
-    // vector<uint8_t> respondMessage;
-    // if(!pollMessage(rawMessage, respondMessage)) return {};
-    // if(respondMessage.empty()){
-    //     log_.debug("未接收到有效数据");
-    //     return {};
-    // }
     auto pollResult = pollMessage(rawMessage);
-    if(!pollResult.has_value()) return {};
+    if(!pollResult.has_value())
+        throw std::logic_error("未接收到有效数据");
+    const vector<uint8_t> repmsg = pollResult.value();
 
-    auto& msg = pollResult.value();
-    BOOST_ASSERT(msg.size() > 5);
-    BOOST_ASSERT((msg.size() - 5) % 2 == 0);
+    uint16_t rawRegistersNum = (repmsg.size() - 5) / sizeof(uint16_t);
+    if(rawRegistersNum != cellvoltNum)
+        throw std::logic_error("数据格式错误");
 
-    vector<uint16_t> registers;
-    for(size_t i = 3; i < msg.size() - 2; i+= 2){
-        const uint16_t value = static_cast<uint16_t>(msg[i] << 8 | msg[i+1]);
-        registers.push_back(value);
+    vector<uint16_t> rawRegisters(rawRegistersNum);
+    ::memcpy(rawRegisters.data(), repmsg.data() + 3, repmsg.size() - 5);
+    vector<uint16_t> hostEndianRegisters;
+    for(auto itr = rawRegisters.begin(); itr != rawRegisters.end(); itr++){
+        const uint16_t hostEndianData = be16toh(*itr);
+        hostEndianRegisters.push_back(hostEndianData);
     }
-    BOOST_ASSERT(registers.size() == cellvoltNum);
-    return createBmuCellvoltSummary(registers);
+    return createBmuCellvoltSummary(hostEndianRegisters);
+}
+catch(const std::exception& e){
+    log_.debugStream() << e.what();
+}
+    return {};
 }
 
 CellvoltSummary BmuPoller::createBmuCellvoltSummary(const vector<uint16_t>& frameRegisters)
@@ -222,30 +225,27 @@ std::optional<CelltemSummary> BmuPoller::fetchBmuCelltem(const uint16_t bcuIndex
                                                                 celltemBeginAddr + bcuOffset + bmuOffset,
                                                                 celltemCapacity + terminaltemNum);
 
-    // vector<uint8_t> respondMessage;
-    // if(!pollMessage(rawMessage, respondMessage)) return {};
-    // if(respondMessage.empty()){
-    //     log_.debug("未接收到有效数据");
-    //     return {};
-    // }
     auto pollResult = pollMessage(rawMessage);
-    if(!pollResult.has_value()) return {};
+    if(!pollResult.has_value())
+        throw std::logic_error("未接收到有效数据");
+    const vector<uint8_t> repmsg = pollResult.value();
 
-    auto& msg = pollResult.value();
-    BOOST_ASSERT(msg.size() > 5);
-    BOOST_ASSERT((msg.size() - 5) % 2 == 0);
+    uint16_t rawRegistersNum = (repmsg.size() - 5) / sizeof(uint16_t);
+    if(rawRegistersNum != celltemCapacity + terminaltemNum)
+        throw std::logic_error("数据格式错误");
 
-    vector<uint16_t> registers;
-    for(size_t i = 3; i < msg.size() - 2; i+= 2){
-        const uint16_t value = static_cast<uint16_t>(msg[i] << 8 | msg[i+1]);
-        registers.push_back(value);
+    vector<uint16_t> rawRegisters(rawRegistersNum);
+    ::memcpy(rawRegisters.data(), repmsg.data() + 3, repmsg.size() - 5);
+    vector<uint16_t> hostEndianRegisters;
+    for(auto itr = rawRegisters.begin(); itr != rawRegisters.end(); itr++){
+        const uint16_t hostEndianData = be16toh(*itr);
+        hostEndianRegisters.push_back(hostEndianData);
     }
-    BOOST_ASSERT(registers.size() == celltemCapacity + terminaltemNum);
 
     // 截取 { 电芯温度数据块, 端子温度数据块 }
     std::vector<uint16_t> celltemData, terminaltemData;
     {
-        auto& allTemData = registers;
+        auto& allTemData = rawRegisters;
         move(allTemData.begin(), allTemData.begin() + celltemNum, back_inserter(celltemData));
 
         const uint16_t celltemCapacity{ 64 };

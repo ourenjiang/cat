@@ -66,7 +66,7 @@ public:
 private:
     void onTimeout(const boost::system::error_code &error);
     void doWork();
-    bool pollMessage(vector<uint8_t>& requestMessage, vector<uint8_t>& respondMessage);
+    std::optional<vector<uint8_t>> pollMessage(const vector<uint8_t>& reqmsg);
 
     std::optional<_0406_0460_Summary> doPoll_0406_0460();
     _0406_0460_Summary createSummary_0406_0460(const vector<uint16_t>&);
@@ -84,7 +84,9 @@ private:
     log4cpp::Category& log_;
     boost::asio::io_service io_service_;
     boost::asio::steady_timer timer_;
-    std::unique_ptr<ZmqRequest> requester_;
+    // std::unique_ptr<ZmqRequest> requester_;
+    zmq::context_t zmqContext_;
+    zmq::socket_t zmqDealer_;
     std::unique_ptr<ZmqPublish> publisher_;
     std::thread loopThread_;
 };
