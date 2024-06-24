@@ -33,9 +33,7 @@ Setting::Setting()
 
 void Setting::registerHttpInterfaces()
 {
-    using std::placeholders::_1;
-    using std::placeholders::_2;
-
+    using namespace std::placeholders;
     auto& serv = utils::getHttpServerSingleton();
     serv.Post("/bau/powerOff", httplib::Server::Handler(bind(&Setting::requestCallbackPowerOff, this, _1, _2)));
     serv.Post("/bau/quickStartup", httplib::Server::Handler(bind(&Setting::requestCallbackQuickStartup, this, _1, _2)));

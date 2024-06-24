@@ -22,9 +22,7 @@ WeekPlan::WeekPlan()
 
 void WeekPlan::registerHttpInterfaces()
 {
-    using std::placeholders::_1;
-    using std::placeholders::_2;
-
+    using namespace std::placeholders;
     auto& serv = utils::getHttpServerSingleton();
     serv.Post("/strategy/xftg/weekPlan", httplib::Server::Handler(bind(&WeekPlan::requestCallbackPost, this, _1, _2)));
     serv.Get("/strategy/xftg/weekPlan", httplib::Server::Handler(bind(&WeekPlan::requestCallbackGet, this, _1, _2)));

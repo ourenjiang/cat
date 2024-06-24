@@ -224,13 +224,13 @@ void Station::initPollerSubscriberCallbacks()
 {
     using namespace std::placeholders;
     poller_.addSubscriber("tcp://127.0.0.1:6700", { "BauSummary" },
-            bind(&Station::bauReceiveCallback, this, _1));
+            bind(&Station::bauReceiveCallback, this, _1, _2));
     poller_.addSubscriber("tcp://127.0.0.1:6701", { "BcuStatus" },
-            bind(&Station::bcuReceiveCallback, this, _1));
+            bind(&Station::bcuReceiveCallback, this, _1, _2));
     poller_.addSubscriber("tcp://127.0.0.1:6702", { "BmuStatus" },
-            bind(&Station::bmuReceiveCallback, this, _1));
+            bind(&Station::bmuReceiveCallback, this, _1, _2));
     poller_.addSubscriber("tcp://127.0.0.1:6710", { "PcsSummary" },
-            bind(&Station::pcsReceiveCallback, this, _1));
+            bind(&Station::pcsReceiveCallback, this, _1, _2));
 }
 
 void Station::initPollerRespondCallbacks()
@@ -336,17 +336,10 @@ void Station::initPollerRespondCallbacks()
 
 }
 
-bool Station::parseBauTopicBauStatus(const string& message)
+void Station::parseBauTopicBauStatus(const string& message)
 {
-    const string topic{ "BauSummary" };
-    if(message.compare(0, topic.size(), topic) != 0){
-        return false;
-    }
-
     tuple<int, bau::BingjiStatusSummary, bau::BauStatusSummary> requestBody;
-    const bool unpackResult = msgpackWrapper::unpack(message.data() + topic.size(),
-                                                message.size() - topic.size(), 
-                                                requestBody);
+    const bool unpackResult = msgpackWrapper::unpack(message.data(), message.size(), requestBody);
 
     auto& [branchIndex, bingjiStatusSummaryNew, bauStatusSummaryNew] = requestBody;
 
@@ -392,23 +385,15 @@ bool Station::parseBauTopicBauStatus(const string& message)
         snapshot.emplace_back(miscellaneous::getCurrentTimestamp(), 
                                 bauStatusSummaryCache.volt * bauStatusSummaryCache.cur * 0.001);
     }
-    return true;
 }
 
-void Station::bauReceiveCallback(const string& message)
+void Station::bauReceiveCallback(const string& topic, const string& body)
 {
-    if(parseBauTopicBauStatus(message)){
-        return;
-    }
-
-    {
-        const string topic{ "Timeout" };
-        if(message.compare(0, topic.size(), topic) != 0){
-            return;
-        }
+    if(topic == "BauSummary") parseBauTopicBauStatus(body);
+    else if(topic == "Timeout"){
 
         int branchIndex;
-        std::memcpy(&branchIndex, message.data() + topic.size(), sizeof(int));
+        std::memcpy(&branchIndex, body.data() + body.size(), sizeof(int));
         
         // 更新设备在线状态
         auto& branchList = stationInfo_->branchList;
@@ -639,110 +624,100 @@ void Station::updatePcsWarningAndFaultMap(pcs::PcsInfo& pcsInfo, const uint16_t 
     if(faultStatus.warning2_ctOrHallOpenCircuitFault) ++pcsInfo.faultCount;
 }
 
-void Station::bcuReceiveCallback(const string& message)
+void Station::bcuReceiveCallback(const string& topic, const string& body)
 {
 try
 {
-    const string topic{ "BcuStatus" };
-    BOOST_ASSERT(message.compare(0, topic.size(), topic) == 0);
+    if(topic == "BcuStatus"){
+        tuple<int, int, bau::BcuStatusSummary> requestBody;
+        const bool unpackResult = msgpackWrapper::unpack(body.data(), body.size(), requestBody);
 
-    tuple<int, int, bau::BcuStatusSummary> requestBody;
-    const bool unpackResult = msgpackWrapper::unpack(message.data() + topic.size(),
-                                                message.size() - topic.size(), 
-                                                requestBody);
+        auto& [branchIndex, bcuIndex, summary] = requestBody;
 
-    auto& [branchIndex, bcuIndex, summary] = requestBody;
-
-    // 保存
-    auto& branchList = stationInfo_->branchList;
-    if(branchList.find(branchIndex) == branchList.end()){
-        return;
+        // 保存
+        auto& branchList = stationInfo_->branchList;
+        if(branchList.find(branchIndex) == branchList.end()){
+            return;
+        }
+        auto& branchInfo = branchList[branchIndex];
+        auto& bauInfo = branchInfo->bauInfo;
+        auto& bcuList = bauInfo.bcuList;
+        if(bcuList.find(bcuIndex) == bcuList.end()){
+            return;
+        }
+        auto& bcuInfo = bcuList[bcuIndex];
+        bcuInfo.base = summary;
+        // 更新告警状态
+        updateBcuWarningAndFaultMap(bcuInfo,
+                                    summary.warnCountL1, summary.warnCountL2, 
+                                    summary.warnCountL3, summary.faultStatus);
+        // 更新设备在线状态
+        bcuInfo.onlineFlag = true;
     }
-    auto& branchInfo = branchList[branchIndex];
-    auto& bauInfo = branchInfo->bauInfo;
-    auto& bcuList = bauInfo.bcuList;
-    if(bcuList.find(bcuIndex) == bcuList.end()){
-        return;
-    }
-    auto& bcuInfo = bcuList[bcuIndex];
-    bcuInfo.base = summary;
-    // 更新告警状态
-    updateBcuWarningAndFaultMap(bcuInfo,
-                                summary.warnCountL1, summary.warnCountL2, summary.warnCountL3, summary.faultStatus);
-    // 更新设备在线状态
-    bcuInfo.onlineFlag = true;
 }
 catch(const std::exception& e){
     std::cerr << e.what() << '\n';
 }
 }
 
-void Station::bmuReceiveCallback(const string& message)
+void Station::bmuReceiveCallback(const string& topic, const string& body)
 {
 try
 {
-    const string topic{ "BmuStatus" };
-    BOOST_ASSERT(message.compare(0, topic.size(), topic) == 0);
+    if(topic == "BmuStatus"){
+        tuple<int, int, int, bau::CellvoltSummary, bau::CelltemSummary> requestBody;
+        const bool unserializedResult = msgpackWrapper::unpack(body.data(), body.size(), requestBody);
+        BOOST_ASSERT(unserializedResult);
 
-    tuple<int, int, int, bau::CellvoltSummary, bau::CelltemSummary> body;
-    const bool unserializedResult = msgpackWrapper::unpack(message.data() + topic.size(),
-                                                            message.size() - topic.size(), body);
-    BOOST_ASSERT(unserializedResult);
-
-    auto [branchIndex, bcuIndex, bmuIndex, cellvoltSummary, celltemSummary] = body;
-    
-    auto& branchList = stationInfo_->branchList;
-    if(branchList.find(branchIndex) == branchList.end()){
-        throw std::invalid_argument("branchIndex not exist");
+        auto [branchIndex, bcuIndex, bmuIndex, cellvoltSummary, celltemSummary] = requestBody;
+        
+        auto& branchList = stationInfo_->branchList;
+        if(branchList.find(branchIndex) == branchList.end()){
+            throw std::invalid_argument("branchIndex not exist");
+        }
+        auto& branchInfo = branchList[branchIndex];
+        auto& bauInfo = branchInfo->bauInfo;
+        auto& bcuList = bauInfo.bcuList;
+        if(bcuList.find(bcuIndex) == bcuList.end()){
+            throw std::invalid_argument("bcuIndex not exist");
+        }
+        auto& bcuInfo = bcuList[bcuIndex];
+        auto& bmuList = bcuInfo.bmuList;
+        if(bmuList.find(bmuIndex) == bmuList.end()){
+            throw std::invalid_argument("bmuIndex not exist");
+        }
+        auto& bmuInfo = bmuList[bmuIndex];
+        auto& cellvoltInfo = bmuInfo.cellvoltInfo;
+        bmuInfo.cellvoltInfo = cellvoltSummary;
+        bmuInfo.celltemInfo = celltemSummary;
     }
-    auto& branchInfo = branchList[branchIndex];
-    auto& bauInfo = branchInfo->bauInfo;
-    auto& bcuList = bauInfo.bcuList;
-    if(bcuList.find(bcuIndex) == bcuList.end()){
-        throw std::invalid_argument("bcuIndex not exist");
-    }
-    auto& bcuInfo = bcuList[bcuIndex];
-    auto& bmuList = bcuInfo.bmuList;
-    if(bmuList.find(bmuIndex) == bmuList.end()){
-        throw std::invalid_argument("bmuIndex not exist");
-    }
-    auto& bmuInfo = bmuList[bmuIndex];
-    auto& cellvoltInfo = bmuInfo.cellvoltInfo;
-    bmuInfo.cellvoltInfo = cellvoltSummary;
-    bmuInfo.celltemInfo = celltemSummary;
 }
 catch(const std::exception& e){
     log_.errorStream() << e.what();
 }
 }
 
-void Station::pcsReceiveCallback(const string& message)
+void Station::pcsReceiveCallback(const string& topic, const string& body)
 {   
-    const string topic{ "PcsSummary" };
-    if(message.compare(0, topic.size(), topic) != 0){
-        return;
+    if(topic == "PcsSummary"){
+        tuple<int, pcs::_0406_0460_Summary, pcs::_0474_04D0_Summary> requestBody;
+        const bool unpackResult = msgpackWrapper::unpack(body.data(), body.size(), requestBody);
+
+        auto& [branchIndex, obj_0406_0460_Summary, obj_0474_04D0_Summary] = requestBody;
+
+        auto& branchList = stationInfo_->branchList;
+        if(branchList.find(branchIndex) == branchList.end()){
+            return;
+        }
+        auto& branchInfo = branchList[branchIndex];
+        auto& pcsInfo = branchInfo->pcsInfo;
+        auto& frame_0406_0460_summary = pcsInfo.frame_0406_0460_summary;
+        auto& frame_0474_04D0_summary = pcsInfo.frame_0474_04D0_summary;
+        frame_0406_0460_summary = obj_0406_0460_Summary;
+        frame_0474_04D0_summary = obj_0474_04D0_Summary;
+        // 更新告警状态
+        updatePcsWarningAndFaultMap(pcsInfo, obj_0406_0460_Summary.warnStatus1, obj_0406_0460_Summary.warnCountL2);
+        // 更新设备在线状态
+        pcsInfo.onlineFlag = true;
     }
-
-    tuple<int, pcs::_0406_0460_Summary, pcs::_0474_04D0_Summary> requestBody;
-    const bool unpackResult = msgpackWrapper::unpack(message.data() + topic.size(),
-                                                message.size() - topic.size(), 
-                                                requestBody);
-
-    auto& [branchIndex, obj_0406_0460_Summary, obj_0474_04D0_Summary] = requestBody;
-
-    auto& branchList = stationInfo_->branchList;
-    if(branchList.find(branchIndex) == branchList.end()){
-        return;
-    }
-    auto& branchInfo = branchList[branchIndex];
-    auto& pcsInfo = branchInfo->pcsInfo;
-    auto& frame_0406_0460_summary = pcsInfo.frame_0406_0460_summary;
-    auto& frame_0474_04D0_summary = pcsInfo.frame_0474_04D0_summary;
-    frame_0406_0460_summary = obj_0406_0460_Summary;
-    frame_0474_04D0_summary = obj_0474_04D0_Summary;
-    // 更新告警状态
-    updatePcsWarningAndFaultMap(pcsInfo, obj_0406_0460_Summary.warnStatus1, obj_0406_0460_Summary.warnCountL2);
-    // 更新设备在线状态
-    pcsInfo.onlineFlag = true;
-    return;
 }

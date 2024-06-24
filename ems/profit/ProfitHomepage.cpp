@@ -14,8 +14,7 @@ Profit::Profit()
 
 void Profit::registerAllInterfaces()
 {
-    using std::placeholders::_1;
-    using std::placeholders::_2;
+    using namespace std::placeholders;
     auto& serv = utils::getHttpServerSingleton();
     serv.Get("/profit", bind(&Profit::requestCallback, this, _1, _2));
 }

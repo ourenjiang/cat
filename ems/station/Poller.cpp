@@ -10,16 +10,21 @@ Poller::Poller()
 }
 
 void Poller::addSubscriber(const string& address, const vector<string>& topicList, 
-                        function<void(const string&)> readCallback)
+                        function<void(const string&, const string&)> readCallback)
 {
-    auto& handler = handlers_.emplace_back(make_tuple<>(ZmqSubscribe(address), readCallback));
+    auto& handler = handlers_.emplace_back(
+        make_tuple<>(zmq::socket_t(zmq::socket_t(zmqContext_, zmq::socket_type::sub)),
+        readCallback));
 
     auto& zmqSubscriber = std::get<0>(handler);
     for(const string& item: topicList){
-        zmqSubscriber.subscribe(item);
+        // zmqSubscriber.subscribe(item);
+        zmqSubscriber.connect(address);
+        zmqSubscriber.set(zmq::sockopt::subscribe, item);
     }
 
-    zmq::pollitem_t item{ zmqSubscriber.socket(), 0, ZMQ_POLLIN, 0 };
+    // zmq::pollitem_t item{ zmqSubscriber.socket(), 0, ZMQ_POLLIN, 0 };
+    zmq::pollitem_t item{ zmqSubscriber, 0, ZMQ_POLLIN, 0 };
     pollitems_.emplace_back(item);
 }
 
@@ -58,9 +63,16 @@ void Poller::doPoll()
 
         auto& [subscriber, callback] = handlers_[index];
 
-        string rBuffer;
-        const bool result = subscriber.recv(rBuffer);
-        callback(rBuffer);
+        // string rBuffer;
+        // const bool result = subscriber.recv(rBuffer);
+        // callback(rBuffer);
+        zmq::message_t topic;
+        zmq::message_t body;
+        (void)subscriber.recv(topic);
+        (void)subscriber.recv(body);
+        const string topicStream(static_cast<char*>(topic.data()), topic.size());
+        const string bodyStream(static_cast<char*>(body.data()), body.size());
+        callback(topicStream, bodyStream);
     }
 }
 

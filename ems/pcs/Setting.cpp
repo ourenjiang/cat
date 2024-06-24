@@ -18,9 +18,7 @@ Setting::Setting()
 
 void Setting::registerHttpInterfaces()
 {
-    using std::placeholders::_1;
-    using std::placeholders::_2;
-
+    using namespace std::placeholders;
     auto& serv = utils::getHttpServerSingleton();
     serv.Post("/pcs/setting", httplib::Server::Handler(bind(&Setting::requestCallback, this, _1, _2)));
 }

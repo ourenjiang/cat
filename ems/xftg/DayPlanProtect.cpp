@@ -21,9 +21,7 @@ DayPlanProtect::DayPlanProtect()
 
 void DayPlanProtect::registerHttpInterfaces()
 {
-    using std::placeholders::_1;
-    using std::placeholders::_2;
-
+    using namespace std::placeholders;
     auto& serv = utils::getHttpServerSingleton();
     serv.Post("/strategy/protectParams", httplib::Server::Handler(bind(&DayPlanProtect::requestCallbackPost, this, _1, _2)));
     serv.Get("/strategy/protectParams", httplib::Server::Handler(bind(&DayPlanProtect::requestCallbackGet, this, _1, _2)));

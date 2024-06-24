@@ -17,7 +17,7 @@ public:
     Poller();
     void setStationInfo(std::shared_ptr<StationInfo> stationInfo){ stationInfo_ = stationInfo; }
     void addSubscriber(const string& address, const vector<string>& topicList, 
-                        function<void(const string&)> readCallback);
+                        function<void(const string&, const string&)> readCallback);
     void doPoll();
     void addRespondCallback(const string& key,
                             function<vector<byte> (std::shared_ptr<StationInfo>, const vector<byte>&)> callback);
@@ -26,7 +26,9 @@ private:
     void doRespond();
 
     std::shared_ptr<StationInfo> stationInfo_;
-    vector<tuple<ZmqSubscribe, function<void(const string&)>>> handlers_;
+    zmq::context_t zmqContext_;
+    // vector<tuple<ZmqSubscribe, function<void(const string&)>>> handlers_;
+    vector<tuple<zmq::socket_t, function<void(const string&, const string&)>>> handlers_;
     vector<zmq::pollitem_t> pollitems_;
 
     unique_ptr<ZmqRespond> responser_;

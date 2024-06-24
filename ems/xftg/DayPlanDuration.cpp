@@ -21,9 +21,7 @@ DayPlanDuration::DayPlanDuration()
 
 void DayPlanDuration::registerHttpInterfaces()
 {
-    using std::placeholders::_1;
-    using std::placeholders::_2;
-
+    using namespace std::placeholders;
     auto& serv = utils::getHttpServerSingleton();
     serv.Post("/strategy/xftg/dayPlan", httplib::Server::Handler(bind(&DayPlanDuration::requestCallbackPost, this, _1, _2)));
     serv.Get("/strategy/xftg/dayPlan", httplib::Server::Handler(bind(&DayPlanDuration::requestCallbackGet, this, _1, _2)));

@@ -15,9 +15,7 @@ StorageEnergySystem::StorageEnergySystem()
 
 void StorageEnergySystem::registerAllInterfaces()
 {
-    using std::placeholders::_1;
-    using std::placeholders::_2;
-
+    using namespace std::placeholders;
     auto& serv = utils::getHttpServerSingleton();
     serv.Get("/storageEnergySystem", bind(&StorageEnergySystem::requestCallback, this, _1, _2));
 }

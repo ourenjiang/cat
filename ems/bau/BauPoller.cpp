@@ -17,6 +17,7 @@ BauPoller::BauPoller()
     : log_(Log4cppWrapper::getLogger(3))
     , timer_(io_service_, asio::chrono::milliseconds(500))
     , zmqDealer_(zmqContext_, zmq::socket_type::dealer)
+    , zmqPublisher_(zmqContext_, zmq::socket_type::pub)
 {
     {
         auto& cfgRoot = YamlcppWrapper::getRoot();
@@ -45,7 +46,8 @@ void BauPoller::initPublishInterface(const std::string& ip, const uint16_t port)
     publishPort_ = port;
 
     // 初始化发布接口
-    publisher_ = make_shared<ZmqPublish>(ip + to_string(port));
+    // publisher_ = make_shared<ZmqPublish>(ip + to_string(port));
+    zmqPublisher_.bind(ip + to_string(port));
 }
 
 BauPoller::~BauPoller()
@@ -335,16 +337,16 @@ BauStatusSummary BauPoller::createBauStatusSummary(const vector<uint16_t>& frame
 
 void BauPoller::publish(const string topic, const int location, const BingjiStatusSummary& bingjiStatusSummary, const BauStatusSummary& bauStatusSummary)
 {
-    vector<byte> msgBuffer(reinterpret_cast<const byte*>(topic.data()),
-                                reinterpret_cast<const byte*>(topic.data() + topic.size()));
+    // vector<byte> msgBuffer(reinterpret_cast<const byte*>(topic.data()),
+    //                             reinterpret_cast<const byte*>(topic.data() + topic.size()));
     auto msgBody = make_tuple(location, bingjiStatusSummary, bauStatusSummary);
-
     auto serializedBody = msgpackWrapper::pack(msgBody);
-    std::copy(reinterpret_cast<const byte*>(serializedBody.data()),
-                reinterpret_cast<const byte*>(serializedBody.data() + serializedBody.size()), std::back_inserter(msgBuffer));
+    zmq::message_t msgbody(serializedBody.data(), serializedBody.size());
+    // std::copy(reinterpret_cast<const byte*>(serializedBody.data()),
+    //             reinterpret_cast<const byte*>(serializedBody.data() + serializedBody.size()), std::back_inserter(msgBuffer));
 
-    if(!publisher_->send(msgBuffer.data(), msgBuffer.size()))
-        log_.errorStream() << topic << " publish failed";
+    zmqPublisher_.send(zmq::message_t(topic), zmq::send_flags::sndmore);
+    zmqPublisher_.send(msgbody, zmq::send_flags::none);
 }
 
 uint16_t BauPoller::getU16(const uint16_t addr, const uint16_t beginAddr, const vector<uint16_t>& frameRegisters)

@@ -19,9 +19,7 @@ OperationRecord::OperationRecord()
 
 void OperationRecord::registerHttpInterfaces()
 {
-    using std::placeholders::_1;
-    using std::placeholders::_2;
-
+    using namespace std::placeholders;
     auto& serv = utils::getHttpServerSingleton();
     serv.Get("/operationRecord", httplib::Server::Handler(bind(&OperationRecord::requestCallbackGet, this, _1, _2)));
     serv.Get("/operationRecordPageInfo", httplib::Server::Handler(bind(&OperationRecord::requestCallbackGetPageInfo, this, _1, _2)));

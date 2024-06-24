@@ -15,8 +15,7 @@ PublicInfo::PublicInfo()
 
 void PublicInfo::registerAllInterfaces()
 {
-    using std::placeholders::_1;
-    using std::placeholders::_2;
+    using namespace std::placeholders;
     auto& serv = utils::getHttpServerSingleton();
     serv.Get("/branchPublicInfo", bind(&PublicInfo::requestCallback, this, _1, _2));
 }

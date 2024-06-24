@@ -47,8 +47,7 @@ bool UserManager::insertDefault()
 
 void UserManager::registerCallbacks()
 {
-    using std::placeholders::_1;
-    using std::placeholders::_2;
+    using namespace std::placeholders;
     using httplib::Server;
     auto& serv = utils::getHttpServerSingleton();
     serv.Get("/user", bind(&UserManager::getCallback, this, _1, _2));

@@ -16,9 +16,7 @@ HeapSystem::HeapSystem()
 
 void HeapSystem::registerAllInterfaces()
 {
-    using std::placeholders::_1;
-    using std::placeholders::_2;
-
+    using namespace std::placeholders;
     auto& serv = utils::getHttpServerSingleton();
     serv.Get("/heapSystem", bind(&HeapSystem::requestCallback, this, _1, _2));
 }

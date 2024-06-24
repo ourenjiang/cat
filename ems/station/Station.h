@@ -58,19 +58,19 @@ private:
     void initBcuList(map<int, bau::BcuInfo>& bcuList, const vector<int>& bcuIndexListOnline, const int);
     void doXftgStrategy(BranchInfo& branchInfo);
     
-    void bauReceiveCallback(const string& sub);
-    bool parseBauTopicBauStatus(const string& message);
+    void bauReceiveCallback(const string& topic, const string& body);
+    void parseBauTopicBauStatus(const string& message);
 
     void updateBauWarningAndFaultMap(bau::BauInfo& bauInfo, const uint32_t warningLevel1Bits, const uint32_t warningLevel2Bits,
                                         const uint32_t warningLevel3Bits, const uint32_t faultBits);
     
-    void bcuReceiveCallback(const string& sub);
+    void bcuReceiveCallback(const string& topic, const string& body);
     void updateBcuWarningAndFaultMap(bau::BcuInfo& bcuInfo, const uint32_t warningLevel1Bits, const uint32_t warningLevel2Bits,
                                         const uint32_t warningLevel3Bits, const uint32_t faultBits);
 
-    void bmuReceiveCallback(const string& sub);
+    void bmuReceiveCallback(const string& topic, const string& body);
 
-    void pcsReceiveCallback(const string& sub);
+    void pcsReceiveCallback(const string& topic, const string& body);
     void updatePcsWarningAndFaultMap(pcs::PcsInfo& pcsInfo, const uint16_t warning1Bits, const uint16_t warning2Bits);
 
     log4cpp::Category& log_;

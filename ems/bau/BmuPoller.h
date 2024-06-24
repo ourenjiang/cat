@@ -73,14 +73,15 @@ private:
     CelltemSummary createBmuCelltemSummary(const vector<uint16_t>&, const vector<uint16_t>&);
 
     log4cpp::Category& log_;
-    // std::shared_ptr<ZmqRequest> ZmqRequest_;
     zmq::context_t zmqContext_;
     zmq::socket_t zmqDealer_;
+    zmq::socket_t zmqSubscriber_;
+    zmq::socket_t zmqPublisher_;
     int pollerCurrentBcuIndex_;
     int pollerCurrentBmuIndex_;
     int branchIndex_;
-    std::shared_ptr<ZmqSubscribe> bauFrameSubscriber_;
-    std::shared_ptr<ZmqPublish> bmuCelltemPublisher_;
+    // std::shared_ptr<ZmqSubscribe> bauFrameSubscriber_;
+    // std::shared_ptr<ZmqPublish> bmuCelltemPublisher_;
     BauStatusSummary bauStatus_;
     std::thread loopThread_;
 };

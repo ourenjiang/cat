@@ -13,8 +13,7 @@ DeviceTreeList::DeviceTreeList()
 
 void DeviceTreeList::registerHttpInterfaces()
 {
-    using std::placeholders::_1;
-    using std::placeholders::_2;
+    using namespace std::placeholders;
     using httplib::Server;
     auto& serv = utils::getHttpServerSingleton();
     serv.Get("/deviceTreelist", bind(&DeviceTreeList::requestCallback, this, _1, _2));

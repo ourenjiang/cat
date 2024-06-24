@@ -15,9 +15,7 @@ RealtimeWarning::RealtimeWarning()
 }
 void RealtimeWarning::registerHttpInterfaces()
 {
-    using std::placeholders::_1;
-    using std::placeholders::_2;
-
+    using namespace std::placeholders;
     auto& serv = utils::getHttpServerSingleton();
     serv.Get("/pcsWarningAndFault", httplib::Server::Handler(bind(&RealtimeWarning::requestCallback, this, _1, _2)));
 }

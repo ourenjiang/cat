@@ -22,9 +22,7 @@ DayPlan::DayPlan()
 
 void DayPlan::registerHttpInterfaces()
 {
-    using std::placeholders::_1;
-    using std::placeholders::_2;
-
+    using namespace std::placeholders;
     auto& serv = utils::getHttpServerSingleton();
     serv.Post("/xftg/electricityPrice/dayPlan", httplib::Server::Handler(bind(&DayPlan::requestCallbackPost, this, _1, _2)));
     serv.Get("/xftg/electricityPrice/dayPlan", httplib::Server::Handler(bind(&DayPlan::requestCallbackGet, this, _1, _2)));

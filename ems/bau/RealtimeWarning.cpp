@@ -16,9 +16,7 @@ RealtimeWarning::RealtimeWarning()
 }
 void RealtimeWarning::registerHttpInterfaces()
 {
-    using std::placeholders::_1;
-    using std::placeholders::_2;
-
+    using namespace std::placeholders;
     auto& serv = utils::getHttpServerSingleton();
     serv.Get("/bauWarningAndFault", httplib::Server::Handler(bind(&RealtimeWarning::requestCallbackBau, this, _1, _2)));
     serv.Get("/bcuWarningAndFault", httplib::Server::Handler(bind(&RealtimeWarning::requestCallbackBcu, this, _1, _2)));

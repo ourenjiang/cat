@@ -15,6 +15,8 @@ BcuPoller::BcuPoller()
     : log_(ems::Log4cppWrapper::getLogger(3))
     , bcuIndexListOnlineItr_(bcuIndexListOnline_.begin())
     , zmqDealer_(zmqContext_, zmq::socket_type::dealer)
+    , zmqSubscriber_(zmqContext_, zmq::socket_type::sub)
+    , zmqPublisher_(zmqContext_, zmq::socket_type::pub)
 {
     auto& cfgRoot = YamlcppWrapper::getRoot();
     const auto& collectors = cfgRoot["collector"];
@@ -41,29 +43,27 @@ BcuPoller::~BcuPoller()
 void BcuPoller::initPublishInterface(const std::string& addr)
 {
     // 初始化发布接口
-    bcuFramePublisher_ = make_shared<ems::ZmqPublish>(addr);
+    // bcuFramePublisher_ = make_shared<ems::ZmqPublish>(addr);
+    zmqPublisher_.bind(addr);
 }
 
 void BcuPoller::start()
 {
     loopThread_ = std::thread([this]{
     while(true){
-        string rBuffer;
-        bool recvResult = bauFrameSubscriber_->recv(rBuffer);
-        if(!recvResult){
-            /* 接收失败时，不需要对套接字进行重置处理，继续尝试接收. */
-            continue;
-        }
+        zmq::message_t topic;
+        zmq::message_t body;
+        (void)zmqSubscriber_.recv(topic);
+        (void)zmqSubscriber_.recv(body);
+        const string bodyStream(static_cast<char*>(body.data()), body.size());
 
         this_thread::sleep_for(chrono::milliseconds(100));// 错峰
-        const bool result = catchFrameBauBauStatus(rBuffer);
+        const bool result = catchFrameBauBauStatus(bodyStream);
         BOOST_ASSERT(result);
         
         const uint16_t bcuNum{ bauStatus_.bcuOnlineNum };
         if(bcuNum == 0) return;
 
-        // if(pollerCurrentBcuIndex_ >= bcuNum) pollerCurrentBcuIndex_ = 0;
-        // doBcu(pollerCurrentBcuIndex_++);// prepare next
         if(bcuIndexListOnline_.empty()) continue;
         if(bcuIndexListOnlineItr_ == bcuIndexListOnline_.end())
             bcuIndexListOnlineItr_ = bcuIndexListOnline_.begin();
@@ -74,21 +74,14 @@ void BcuPoller::start()
 
 void BcuPoller::subscribeBauStatus(const std::string& addr, const std::string& topic)
 {
-    bauFrameSubscriber_ = make_shared<ZmqSubscribe>(addr);
-    bauFrameSubscriber_->subscribe(topic);
+    zmqSubscriber_.connect(addr);
+    zmqSubscriber_.set(zmq::sockopt::subscribe, topic);
 }
 
 bool BcuPoller::catchFrameBauBauStatus(const string& message)
 {
-    const string topic{ "BauSummary" };
-    if(message.compare(0, topic.size(), topic) != 0){
-        return false;
-    }
-
     tuple<int, bau::BingjiStatusSummary, bau::BauStatusSummary> requestBody;
-    const bool unpackResult = msgpackWrapper::unpack(message.data() + topic.size(),
-                                                message.size() - topic.size(), 
-                                                requestBody);
+    const bool unpackResult = msgpackWrapper::unpack(message.data(), message.size(), requestBody);
     BOOST_ASSERT(unpackResult);
 
     auto& [branchIndex, bingjiStatusSummaryNew, bauStatusSummaryNew] = requestBody;
@@ -150,18 +143,22 @@ try
     }
     auto summary = createBcuStatusSummary(hostEndianRegisters);
     
-    const string topic{ "BcuStatus" };// 主题名称
+    // const string topic{ "BcuStatus" };// 主题名称
     tuple<int, int> location{ branchIndex_, bcuIndex };
     {
-        string msg;
-        std::copy(topic.data(), topic.data() + topic.size(), std::back_inserter(msg));
+        // string msg;
+        // std::copy(topic.data(), topic.data() + topic.size(), std::back_inserter(msg));
 
         auto msgBody = tuple_cat(location, tie(summary));
         auto serializedBody = msgpackWrapper::pack(msgBody);
-        std::copy(serializedBody.data(), serializedBody.data() + serializedBody.size(), std::back_inserter(msg));
+        // std::copy(serializedBody.data(), serializedBody.data() + serializedBody.size(), std::back_inserter(msg));
+        zmq::message_t msgbody(serializedBody.data(), serializedBody.size());
 
-        if(!bcuFramePublisher_->send(msg.data(), msg.size()))
-            log_.debugStream() << topic << " publish failed";
+        const string topic{ "BcuStatus" };
+        zmqPublisher_.send(zmq::message_t(topic), zmq::send_flags::sndmore);
+        zmqPublisher_.send(msgbody, zmq::send_flags::none);
+        // if(!bcuFramePublisher_->send(msg.data(), msg.size()))
+        //     log_.debugStream() << topic << " publish failed";
     }
 }
 catch(const std::exception& e){

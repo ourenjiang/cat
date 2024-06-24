@@ -18,6 +18,8 @@ BmuPoller::BmuPoller()
     , pollerCurrentBmuIndex_(0)
     , branchIndex_(0)// 应该从配置文件加载
     , zmqDealer_(zmqContext_, zmq::socket_type::dealer)
+    , zmqSubscriber_(zmqContext_, zmq::socket_type::sub)
+    , zmqPublisher_(zmqContext_, zmq::socket_type::pub)
 {
     auto& cfgRoot = YamlcppWrapper::getRoot();
     const auto& collectors = cfgRoot["collector"];
@@ -45,19 +47,17 @@ void BmuPoller::start()
 {
     loopThread_ = thread([this]{
     while(true){
-        string rBuffer;
-        bool recvResult = bauFrameSubscriber_->recv(rBuffer);
-        if(!recvResult){
-            /**
-             * 接收失败时，不需要对套接字进行重置处理，继续尝试接收.
-             * 
-            */
-            continue;
-        }
+        {
+            zmq::message_t topic;
+            zmq::message_t body;
+            (void)zmqSubscriber_.recv(topic);
+            (void)zmqSubscriber_.recv(body);
+            const string bodyStream(static_cast<char*>(body.data()), body.size());
 
-        this_thread::sleep_for(chrono::milliseconds(200));// 错峰
-        const bool result = catchFrameBauBauStatus(rBuffer);
-        BOOST_ASSERT(result);
+            this_thread::sleep_for(chrono::milliseconds(200));// 错峰
+            const bool result = catchFrameBauBauStatus(bodyStream);
+            BOOST_ASSERT(result);
+        }
 
         const uint16_t bcuNum{ bauStatus_.bcuOnlineNum };
         if(bcuNum == 0) return;
@@ -89,16 +89,18 @@ void BmuPoller::start()
         // 联合发布
         const string topic{ "BmuStatus" };// 主题名称
 
-        string publishContent;
-        std::copy(topic.data(), topic.data() + topic.size(), std::back_inserter(publishContent));
+        // string publishContent;
+        // std::copy(topic.data(), topic.data() + topic.size(), std::back_inserter(publishContent));
 
         tuple<int, int, int> location{ branchIndex_, pollerCurrentBcuIndex_, pollerCurrentBmuIndex_ };
         auto body = tuple_cat(location, tie(cellvoltSummary.value()), tie(celltemSummary.value()));
         auto serializedBody = msgpackWrapper::pack(body);
-        std::copy(serializedBody.data(), serializedBody.data() + serializedBody.size(), std::back_inserter(publishContent));
-
-        if(!bmuCelltemPublisher_->send(publishContent.data(), publishContent.size()))
-            log_.errorStream() << topic << " publish failed";
+        // std::copy(serializedBody.data(), serializedBody.data() + serializedBody.size(), std::back_inserter(publishContent));
+        zmq::message_t msgbody(serializedBody.data(), serializedBody.size());
+        zmqPublisher_.send(zmq::message_t(topic), zmq::send_flags::sndmore);
+        zmqPublisher_.send(msgbody, zmq::send_flags::none);
+        // if(!bmuCelltemPublisher_->send(publishContent.data(), publishContent.size()))
+        //     log_.errorStream() << topic << " publish failed";
         
         pollerCurrentBmuIndex_++;// 注意递增
     }});
@@ -106,27 +108,23 @@ void BmuPoller::start()
 
 void BmuPoller::subscribeBauStatus(const std::string& addr, const std::string& topic)
 {
-    bauFrameSubscriber_ = make_shared<ZmqSubscribe>(addr);
-    bauFrameSubscriber_->subscribe(topic);
+    // bauFrameSubscriber_ = make_shared<ZmqSubscribe>(addr);
+    // bauFrameSubscriber_->subscribe(topic);
+    zmqSubscriber_.connect(addr);
+    zmqSubscriber_.set(zmq::sockopt::subscribe, topic);
 }
 
 void BmuPoller::initPublishInterface(const std::string& addr)
 {
     // 初始化发布接口
-    bmuCelltemPublisher_ = make_shared<ZmqPublish>(addr);
+    // bmuCelltemPublisher_ = make_shared<ZmqPublish>(addr);
+    zmqPublisher_.bind(addr);
 }
 
 bool BmuPoller::catchFrameBauBauStatus(const string& message)
 {
-    const string topic{ "BauSummary" };
-    if(message.compare(0, topic.size(), topic) != 0){
-        return false;
-    }
-
     tuple<int, bau::BingjiStatusSummary, bau::BauStatusSummary> requestBody;
-    const bool unpackResult = msgpackWrapper::unpack(message.data() + topic.size(),
-                                                message.size() - topic.size(), 
-                                                requestBody);
+    const bool unpackResult = msgpackWrapper::unpack(message.data(), message.size(), requestBody);
     BOOST_ASSERT(unpackResult);
 
     auto& [branchIndex, bingjiStatusSummaryNew, bauStatusSummaryNew] = requestBody;

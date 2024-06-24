@@ -88,13 +88,12 @@ private:
     int branchIndex_;
     std::string publishAddress_;
     log4cpp::Category& log_;
-    // std::shared_ptr<ZmqRequest> ZmqRequest_;
     zmq::context_t zmqContext_;
     zmq::socket_t zmqDealer_;
+    zmq::socket_t zmqSubscriber_;
+    zmq::socket_t zmqPublisher_;
     vector<int> bcuIndexListOnline_;
     vector<int>::iterator bcuIndexListOnlineItr_;
-    std::shared_ptr<ZmqSubscribe> bauFrameSubscriber_;
-    std::shared_ptr<ZmqPublish> bcuFramePublisher_;
     BauStatusSummary bauStatus_;
     std::thread loopThread_;
 };

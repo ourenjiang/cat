@@ -86,7 +86,8 @@ private:
     boost::asio::steady_timer timer_;
     zmq::context_t zmqContext_;
     zmq::socket_t zmqDealer_;
-    std::unique_ptr<ZmqPublish> publisher_;
+    zmq::socket_t zmqPublisher_;
+    // std::unique_ptr<ZmqPublish> publisher_;
     std::thread loopThread_;
 };
 }//namespace pcs

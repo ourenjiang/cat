@@ -15,8 +15,7 @@ MainWiringDiagram::MainWiringDiagram()
 
 void MainWiringDiagram::registerAllInterfaces()
 {
-    using std::placeholders::_1;
-    using std::placeholders::_2;
+    using namespace std::placeholders;
     auto& serv = utils::getHttpServerSingleton();
     serv.Get("/mainWiringDiagram", bind(&MainWiringDiagram::requestCallback, this, _1, _2));
 }

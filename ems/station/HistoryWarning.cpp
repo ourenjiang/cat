@@ -17,9 +17,7 @@ HistoryWarning::HistoryWarning()
 }
 void HistoryWarning::registerHttpInterfaces()
 {
-    using std::placeholders::_1;
-    using std::placeholders::_2;
-
+    using namespace std::placeholders;
     auto& serv = utils::getHttpServerSingleton();
     serv.Get("/warning", httplib::Server::Handler(bind(&HistoryWarning::requestCallbackGet, this, _1, _2)));
     serv.Get("/warningPageInfo", httplib::Server::Handler(bind(&HistoryWarning::requestCallbackGetPageInfo, this, _1, _2)));

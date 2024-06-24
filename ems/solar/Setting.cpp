@@ -23,9 +23,7 @@ bool Setting::setPowerLimit(const string& name, const string& powerLimit)
 
 void Setting::registerHttpInterfaces()
 {
-    using std::placeholders::_1;
-    using std::placeholders::_2;
-
+    using namespace std::placeholders;
     auto& serv = utils::getHttpServerSingleton();
     serv.Get("/solar/setStatus", httplib::Server::Handler(bind(&Setting::methodGetSetStatusCallback, this, _1, _2)));
     serv.Get("/solar/setPowerLimit", httplib::Server::Handler(bind(&Setting::methodGetSetPowerLimitCallback, this, _1, _2)));

@@ -23,9 +23,7 @@ TypeList::TypeList()
 
 void TypeList::registerHttpInterfaces()
 {
-    using std::placeholders::_1;
-    using std::placeholders::_2;
-
+    using namespace std::placeholders;
     auto& serv = utils::getHttpServerSingleton();
     serv.Post("/xftg/electricityPrice/typeList", httplib::Server::Handler(bind(&TypeList::requestCallbackPost, this, _1, _2)));
     serv.Put("/xftg/electricityPrice/typeList", httplib::Server::Handler(bind(&TypeList::requestCallbackPut, this, _1, _2)));
