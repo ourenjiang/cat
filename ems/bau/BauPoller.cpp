@@ -16,6 +16,7 @@ using namespace ems::bau;
 BauPoller::BauPoller()
     : log_(Log4cppWrapper::getLogger(3))
     , timer_(io_service_, asio::chrono::milliseconds(500))
+    , zmqDealer_(zmqContext_, zmq::socket_type::dealer)
 {
     {
         auto& cfgRoot = YamlcppWrapper::getRoot();
@@ -27,7 +28,8 @@ BauPoller::BauPoller()
         BOOST_ASSERT((*resultLoad)["load"].as<bool>());
 
         const string proxyAddress = (*resultLoad)["master"]["address"].as<string>();
-        ZmqRequest_ = make_shared<ZmqRequest>(proxyAddress);
+        // ZmqRequest_ = make_shared<ZmqRequest>(proxyAddress);
+        zmqDealer_.connect(proxyAddress);
     }
 }
 
@@ -82,26 +84,46 @@ std::optional<vector<uint8_t>> BauPoller::pollMessage(vector<uint8_t>& reqmsg)
     // 发送
     const vector<byte> sendmsg(reinterpret_cast<byte*>(serializedMsg.data()),
                                 reinterpret_cast<byte*>(serializedMsg.data()) + serializedMsg.size());
-    bool sendResult = ZmqRequest_->send(sendmsg);
-    if(!sendResult){
-        log_.error("send failed");
-        return {};
+    // bool sendResult = ZmqRequest_->send(sendmsg);
+    // if(!sendResult){
+    //     log_.error("send failed");
+    //     return {};
+    // }
+
+    // // 接收
+    // const auto recvResult = ZmqRequest_->recv();
+    // if(!recvResult.has_value()){
+    //     log_.error("recv failed");
+    //     return {};
+    // }
+
+    // // 反序列化
+    // const auto recvmsg = recvResult.value();
+    // vector<uint8_t> repmsg;
+    // if(!msgpackWrapper::unpack(recvmsg.data(), recvmsg.size(), repmsg)){
+    //     return {};
+    // }
+
+    {
+        zmq::message_t sndmsg(serializedMsg.data(), serializedMsg.size());
+
+        zmq::message_t delimiter;
+        zmqDealer_.send(delimiter, zmq::send_flags::sndmore);
+        zmqDealer_.send(sndmsg, zmq::send_flags::none);
+    }
+    {
+        zmq::message_t delimiter;
+        zmqDealer_.recv(delimiter);
+
+        zmq::message_t rcvmsg;
+        zmqDealer_.recv(rcvmsg);
+
+        vector<uint8_t> repmsg;
+        msgpackWrapper::unpack(rcvmsg.data(), rcvmsg.size(), repmsg);
+        return repmsg;
     }
 
-    // 接收
-    const auto recvResult = ZmqRequest_->recv();
-    if(!recvResult.has_value()){
-        log_.error("recv failed");
-        return {};
-    }
-
-    // 反序列化
-    const auto recvmsg = recvResult.value();
-    vector<uint8_t> repmsg;
-    if(!msgpackWrapper::unpack(recvmsg.data(), recvmsg.size(), repmsg)){
-        return {};
-    }
-    return repmsg;
+    return {};
 }
 
 std::optional<BingjiStatusSummary> BauPoller::doFrameBingjiStatus()
