@@ -43,11 +43,11 @@ void PollForward::start()
     while(true)
     {
         zmq::message_t identity;
-        zmqSocket_.recv(identity);
+        (void)zmqSocket_.recv(identity);
         zmq::message_t delimiter;
-        zmqSocket_.recv(delimiter);
+        (void)zmqSocket_.recv(delimiter);
         zmq::message_t rcvmsg;
-        zmqSocket_.recv(rcvmsg);
+        (void)zmqSocket_.recv(rcvmsg);
 
         //消息代理
         auto pollResult = pollModbusSlave(rcvmsg);
