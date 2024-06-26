@@ -13,12 +13,21 @@ using namespace ems;
 using namespace ems::electricity_price;
 
 TypeList::TypeList()
+    : identity_("ElectricityPriceTypeList")
+    , dealer_(miscellaneous::createZmqSocket(zmq::socket_type::dealer))
 {
     createTable();
     insertIntoDefaultRecord();
     registerHttpInterfaces();
 
-    requester_ = make_unique<ZmqRequest>("tcp://127.0.0.1:6200");
+    dealer_.set(zmq::sockopt::routing_id, identity_);
+    dealer_.connect("tcp://127.0.0.1:6200");
+}
+
+vector<byte> TypeList::identity()
+{
+    const auto beginItr = reinterpret_cast<const byte*>(identity_.data());
+    return { beginItr, beginItr + identity_.size() };
 }
 
 void TypeList::registerHttpInterfaces()
@@ -94,25 +103,16 @@ try
                         << jianInput << jianOutput << fengInput << fengOutput
                         << pingInput << pingOutput << guInput << guOutput;
 
-    // 准备请求消息
-    string publishContent;
-    const string topic = miscellaneous::createFixedSizeString("ElectricityPriceTypeListPost");
-    std::copy(topic.data(), topic.data() + topic.size(), std::back_inserter(publishContent));
-
-    // 发送消息
-    const vector<byte> sendmsg(reinterpret_cast<byte*>(publishContent.data()),
-                                reinterpret_cast<byte*>(publishContent.data()) + publishContent.size());
-    const bool sendResult = requester_->send(sendmsg);
-    if(!sendResult) throw std::runtime_error("zmq send err");
-
+    dealer_.send(zmq::message_t(postSubtitle_), zmq::send_flags::sndmore);
+    dealer_.send(zmq::message_t(), zmq::send_flags::none);
     // 接收消息
-    const auto recvResult = requester_->recv();
-    if(!recvResult) throw std::runtime_error("zmq recv failed");
-    const auto recvmsg = recvResult.value();
+    zmq::message_t rcvmsg;
+    (void)dealer_.recv(rcvmsg);
+
 
     // 先解析标准的响应消息
     pair<bool, vector<byte>> respondMsg;
-    const bool unpackMsgResult = msgpackWrapper::unpack(recvmsg.data(), recvmsg.size(), respondMsg);
+    const bool unpackMsgResult = msgpackWrapper::unpack(rcvmsg.data(), rcvmsg.size(), respondMsg);
     BOOST_ASSERT(unpackMsgResult);
     const auto& [returnStatus, returnContent] = respondMsg;
     if(!returnStatus){
@@ -153,7 +153,13 @@ catch(const std::exception& e){
 }
 }
 
-vector<byte> TypeList::respondCallbackPost(std::shared_ptr<StationInfo> stationInfo, const vector<byte>& msgbody) const
+void TypeList::respondCallback(std::shared_ptr<StationInfo> stationInfo, zmq::socket_t& router,
+                        const vector<byte>& identity, const vector<byte>& subtitle, const vector<byte>& body) const
+{
+
+}   
+
+vector<byte> TypeList::respondCallbackPost(std::shared_ptr<StationInfo> stationInfo, const vector<byte>& msgbody, zmq::socket_t& router) const
 {
     // 重载数据库
 
@@ -161,7 +167,7 @@ vector<byte> TypeList::respondCallbackPost(std::shared_ptr<StationInfo> stationI
     return miscellaneous::convertStringToBytes("success");
 }
 
-vector<byte> TypeList::respondCallbackPut(std::shared_ptr<StationInfo> stationInfo, const vector<byte>& msgbody) const
+vector<byte> TypeList::respondCallbackPut(std::shared_ptr<StationInfo> stationInfo, const vector<byte>& msgbody, zmq::socket_t& router) const
 {
     // 这里需要从数据库重新加载这部分记录.
 
@@ -276,7 +282,7 @@ catch(const std::exception& e){
 }
 }
 
-vector<byte> TypeList::respondCallbackDelete(std::shared_ptr<StationInfo> stationInfo, const vector<byte>& msgbody) const
+vector<byte> TypeList::respondCallbackDelete(std::shared_ptr<StationInfo> stationInfo, const vector<byte>& msgbody, zmq::socket_t& router) const
 {
     // 加载数据库
 
@@ -303,7 +309,7 @@ try
     const string passwordAuth = auth["password"].asString();
     if(!UserManager::doAuth(usernameAuth, passwordAuth))
         throw std::runtime_error("auth failed");
-    const string typeListName = auth["name"].asString();
+    const string typeListName = reqbody["name"].asString();
     
     // 操作数据库
     const string projectPath{ "/opt/paceic_ems_server/main" };
@@ -335,25 +341,15 @@ try
     ElectricityPriceDb << "DELETE FROM ELECTRICITY_PRICE_TYPELIST WHERE NAME = ?;"
                         << typeListName;
 
-    // 准备请求消息
-    string publishContent;
-    const string topic = miscellaneous::createFixedSizeString("ElectricityPriceTypeListDelete");
-    std::copy(topic.data(), topic.data() + topic.size(), std::back_inserter(publishContent));
-
-    // 发送消息
-    const vector<byte> sendmsg(reinterpret_cast<byte*>(publishContent.data()),
-                                reinterpret_cast<byte*>(publishContent.data()) + publishContent.size());
-    const bool sendResult = requester_->send(sendmsg);
-    if(!sendResult) throw std::runtime_error("zmq send err");
-
+    dealer_.send(zmq::message_t(deleteSubtitle_), zmq::send_flags::sndmore);
+    dealer_.send(zmq::message_t(), zmq::send_flags::none);
     // 接收消息
-    const auto recvResult = requester_->recv();
-    if(!recvResult) throw std::runtime_error("zmq recv failed");
-    const auto recvmsg = recvResult.value();
+    zmq::message_t rcvmsg;
+    (void)dealer_.recv(rcvmsg);
 
     // 先解析标准的响应消息
     pair<bool, vector<byte>> standardRespondMsg;
-    const bool standardUnpackResult = msgpackWrapper::unpack(recvmsg.data(), recvmsg.size(), standardRespondMsg);
+    const bool standardUnpackResult = msgpackWrapper::unpack(rcvmsg.data(), rcvmsg.size(), standardRespondMsg);
     BOOST_ASSERT(standardUnpackResult);
     const auto& [returnStatus, returnContent] = standardRespondMsg;
 
@@ -436,25 +432,15 @@ try
                         << guInput << guOutput
                         << typeListName;
 
-    // 准备请求消息
-    string publishContent;
-    const string topic = miscellaneous::createFixedSizeString("ElectricityPriceTypeListPut");
-    std::copy(topic.data(), topic.data() + topic.size(), std::back_inserter(publishContent));
-
-    // 发送消息
-    const vector<byte> sendmsg(reinterpret_cast<byte*>(publishContent.data()),
-                                reinterpret_cast<byte*>(publishContent.data()) + publishContent.size());
-    const bool sendResult = requester_->send(sendmsg);
-    if(!sendResult) throw std::runtime_error("zmq send err");
-
+    dealer_.send(zmq::message_t(putSubtitle_), zmq::send_flags::sndmore);
+    dealer_.send(zmq::message_t(), zmq::send_flags::none);
     // 接收消息
-    const auto recvResult = requester_->recv();
-    if(!recvResult) throw std::runtime_error("zmq recv failed");
-    const auto recvmsg = recvResult.value();
+    zmq::message_t rcvmsg;
+    (void)dealer_.recv(rcvmsg);
 
     // 先解析标准的响应消息
     pair<bool, vector<byte>> respondMsg;
-    const bool unpackMsgResult = msgpackWrapper::unpack(recvmsg.data(), recvmsg.size(), respondMsg);
+    const bool unpackMsgResult = msgpackWrapper::unpack(rcvmsg.data(), rcvmsg.size(), respondMsg);
     BOOST_ASSERT(unpackMsgResult);
     const auto& [returnStatus, returnContent] = respondMsg;
     if(!returnStatus) throw std::runtime_error("server operation failed");
