@@ -370,10 +370,16 @@ try
     const string emailNewValue = emailNew.has_value() ? phoneNew.value() : emailOld;
     // 需要修改用户名，但由于主键不允许修改，因此先保存旧信息并删除旧记录
     if(reqbody.isMember("usernameNew")){
+        // 先检查用户提供的新用户名是否存在
+        const string usernameNewValue = reqbody["usernameNew"].asString();
+        int usernameNewRecordCount{ 0 };
+        db_users << "SELECT COUNT(*) FROM USER WHERE NAME = ?;" << usernameNewValue >> usernameNewRecordCount;
+        if(usernameNewRecordCount > 0)
+            throw AuthException("新用户名已存在", authUsername);
+        
         // 删除旧记录
         db_users << "DELETE FROM USER WHERE NAME = ?;" << usernameOld;
         // 添加修改后的记录
-        const string usernameNewValue = reqbody["usernameNew"].asString();
         db_users << "INSERT INTO USER (NAME, PASSWORD, GRADE, PHONE, EMAIL) VALUES (?, ?, ?, ?, ?);"
                     << usernameNewValue << passwordNewValue << gradeNewValue << phoneNewValue << emailNewValue;
     }
