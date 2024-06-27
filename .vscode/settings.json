@@ -86,6 +86,7 @@
         "charconv": "cpp",
         "csetjmp": "cpp",
         "ranges": "cpp",
-        "scoped_allocator": "cpp"
+        "scoped_allocator": "cpp",
+        "filesystem": "cpp"
     }
 }

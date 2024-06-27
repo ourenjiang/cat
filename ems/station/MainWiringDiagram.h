@@ -63,13 +63,16 @@ public:
     // 1.12 系统极值
     static Json::Value get_peak(const bau::BauStatusSummary& bauStatusSummary);
 
-    vector<byte> respondCallback(std::shared_ptr<StationInfo> stationInfo, const vector<byte>& reqmsg);
+    void respondCallback(std::shared_ptr<StationInfo> stationInfo, zmq::socket_t& router,
+                        const vector<byte>& identity, const vector<byte>& subtitle, const vector<byte>& body);
+    vector<byte> identity();
 private:
     void registerAllInterfaces();
     void requestCallback(const httplib::Request &req, httplib::Response &res);
     static string convertCellAddrFormat(const uint16_t);
 
+    const string identity_;
+    zmq::socket_t dealer_;
     log4cpp::Category& log_;
-    std::unique_ptr<ZmqRequest> requester_;
 };
 }//namespace ems

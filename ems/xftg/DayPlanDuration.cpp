@@ -6,17 +6,25 @@
 #include "utils/MsgpackWrapper_src.hpp"
 #include "utils/Miscellaneous.h"
 #include "ems/station/UserManager.h"
-#include "ems/station/AuthException.h"
+#include "utils/AuthException.h"
 
 using namespace ems::xftg;
 
 DayPlanDuration::DayPlanDuration()
+    : identity_("XftgDayPlanDuration")
+    , dealer_(miscellaneous::createZmqSocket(zmq::socket_type::dealer))
 {
     createTable();
     insertIntoDefaultRecord();
     registerHttpInterfaces();
+    dealer_.set(zmq::sockopt::routing_id, identity_);
+    dealer_.connect("tcp://127.0.0.1:6200");
+}
 
-    requester_ = make_unique<ZmqRequest>("tcp://127.0.0.1:6200");
+vector<byte> DayPlanDuration::identity()
+{
+    const auto beginItr = reinterpret_cast<const byte*>(identity_.data());
+    return { beginItr, beginItr + identity_.size() };
 }
 
 void DayPlanDuration::registerHttpInterfaces()
@@ -91,33 +99,8 @@ try
                 << item["targetPower"].asString();
     }
 
-    // 准备请求消息
-    string publishContent;
-    const string topic = miscellaneous::createFixedSizeString("XftgDayPlanDurationPost");
-    std::copy(topic.data(), topic.data() + topic.size(), std::back_inserter(publishContent));
-
-    // 发送消息
-    const vector<byte> sendmsg(reinterpret_cast<byte*>(publishContent.data()),
-                                reinterpret_cast<byte*>(publishContent.data()) + publishContent.size());
-    const bool sendResult = requester_->send(sendmsg);
-    if(!sendResult) throw std::runtime_error("zmq send err");
-
-    // 接收消息
-    const auto recvResult = requester_->recv();
-    if(!recvResult) throw std::runtime_error("zmq recv failed");
-    const auto recvmsg = recvResult.value();
-
-    // 先解析标准的响应消息
-    pair<bool, vector<byte>> respondMsg;
-    const bool unpackMsgResult = msgpackWrapper::unpack(recvmsg.data(), recvmsg.size(), respondMsg);
-    BOOST_ASSERT(unpackMsgResult);
-    const auto& [returnStatus, returnContent] = respondMsg;
-    if(!returnStatus){
-        // 再解析自定义的响应内容
-        const string errmsg(reinterpret_cast<const char*>(returnContent.data()),
-                                    reinterpret_cast<const char*>(returnContent.data()) + returnContent.size());
-        throw std::runtime_error(errmsg);
-    }
+    dealer_.send(zmq::message_t(postSubtitle_), zmq::send_flags::sndmore);
+    dealer_.send(zmq::message_t(), zmq::send_flags::none);
 
     // 保存'成功'操作记录
     const string status = "success";
@@ -267,34 +250,9 @@ try
     // 执行删除
     XftgDb << "DELETE FROM XFTG_DAYPLAN_DURATION WHERE NAME = ?;" << dayPlanName;
 
-    // 准备请求消息
-    string publishContent;
-    const string topic = miscellaneous::createFixedSizeString("XftgDayPlanDurationDelete");
-    std::copy(topic.data(), topic.data() + topic.size(), std::back_inserter(publishContent));
-
-    // 发送消息
-    const vector<byte> sendmsg(reinterpret_cast<byte*>(publishContent.data()),
-                                reinterpret_cast<byte*>(publishContent.data()) + publishContent.size());
-    const bool sendResult = requester_->send(sendmsg);
-    if(!sendResult) throw std::runtime_error("zmq send err");
-
-    // 接收消息
-    const auto recvResult = requester_->recv();
-    if(!recvResult) throw std::runtime_error("zmq recv failed");
-    const auto recvmsg = recvResult.value();
-
-    // 先解析标准的响应消息
-    pair<bool, vector<byte>> standardRespondMsg;
-    const bool standardUnpackResult = msgpackWrapper::unpack(recvmsg.data(), recvmsg.size(), standardRespondMsg);
-    BOOST_ASSERT(standardUnpackResult);
-    const auto& [returnStatus, returnContent] = standardRespondMsg;
-
-    // 再解析自定义的响应内容
-    if(!returnStatus){
-        const string errmsg(reinterpret_cast<const char*>(returnContent.data()),
-                            reinterpret_cast<const char*>(returnContent.data()) + returnContent.size());
-        throw std::runtime_error(errmsg);
-    }
+    // 通知中心
+    dealer_.send(zmq::message_t(deleteSubtitle_), zmq::send_flags::sndmore);
+    dealer_.send(zmq::message_t(), zmq::send_flags::none);
 
     Json::Value respondContent;
     respondContent["errcode"] = 0;
@@ -309,77 +267,10 @@ catch(const std::exception& e){
 }
 }
 
-vector<byte> DayPlanDuration::respondCallbackDelete(std::shared_ptr<StationInfo> stationInfo, const vector<byte>& msgbody) const
+void DayPlanDuration::respondCallback(std::shared_ptr<StationInfo> stationInfo, zmq::socket_t& router,
+                        const vector<byte>& identity, const vector<byte>& subtitle, const vector<byte>& body) const
 {
     // 返回结果
-    return miscellaneous::convertStringToBytes("success");
-}
-
-vector<byte> DayPlanDuration::respondCallbackPost(std::shared_ptr<StationInfo> stationInfo, const vector<byte>& msgbody) const
-{
-    // 重载数据库
-
-    // 返回结果
-    return miscellaneous::convertStringToBytes("success");
-}
-
-vector<byte> DayPlanDuration::respondCallbackPut(std::shared_ptr<StationInfo> stationInfo, const vector<byte>& msgbody) const
-{
-
-    // // 重新加载数据库表缓存
-    // auto getResult = getRecord(name);// TODO!!!
-    // if(getResult.has_value()){
-
-    //     // 所有依赖了此模板的分支，都将得到更新；
-    //     for(auto& item : stationInfo->branchList){
-
-    //         auto& branchInfo = item.second;
-    //         auto& xftgStrategy = branchInfo->xftgStrategy;
-    //         const string dayPlanName = xftgStrategy.getDayPlanName();
-    //         if(dayPlanName == name){
-
-    //             auto& rawValue = getResult.value().second;
-    //             std::vector<xftg::DurationInfo> durations;
-    //             std::transform(rawValue.begin(), rawValue.end(), std::back_inserter(durations),
-    //                 [&](const Record& record){
-    //                     xftg::DurationInfo info;
-    //                     info.durationName = std::get<0>(record);
-    //                     info.durationBegin = std::get<1>(record);
-    //                     info.durationEnd = std::get<2>(record);
-    //                     info.controlType = std::get<3>(record);
-    //                     info.targetSoc = std::stoi(std::get<4>(record));
-    //                     info.targetPower = std::stod(std::get<5>(record));
-    //                     return info;
-    //             });
-
-    //             xftgStrategy.setDurationInfo(make_pair(name, durations));
-    //         }
-    //     }
-    // }
-
-    // 返回结果
-    return miscellaneous::convertStringToBytes("success");
-}
-
-optional<string> DayPlanDuration::request(const string& reqmsg)
-{
-    const vector<byte> sendmsg(reinterpret_cast<const byte*>(reqmsg.data()),
-                                reinterpret_cast<const byte*>(reqmsg.data()) + reqmsg.size());
-    const bool sendResult = requester_->send(sendmsg);
-    if(!sendResult){
-        cout << "send err" << endl;
-        return {};
-    }
-
-    // 接收
-    const auto recvResult = requester_->recv();
-    if(!recvResult.has_value()){
-        cout << "recv failed" << endl;
-        return {};
-    }
-    const auto recvmsg = recvResult.value();
-    return string(reinterpret_cast<const char*>(recvmsg.data()),
-                    reinterpret_cast<const char*>(recvmsg.data()) + recvmsg.size());
 }
 
 void DayPlanDuration::requestCallbackPut(const httplib::Request &req, httplib::Response &res)
@@ -414,6 +305,13 @@ try
     const string filename{ dbPath + "/Xftg.sqlite" };
     sqlite::database XftgDb(filename);
 
+    // 判断目标记录是否存在
+    int recordCount{0};
+    XftgDb << "SELECT COUNT(*) FROM XFTG_DAYPLAN_DURATION WHERE NAME = ?;"
+        << dayPlanName  >> recordCount;
+    if(recordCount == 0)
+        throw std::invalid_argument("record not exist");
+    
     for(const auto& item: durationList){
         if(!item.isMember("durationName")
             || !item.isMember("durationBegin") || !item.isMember("durationEnd")
@@ -421,11 +319,11 @@ try
             || !item.isMember("targetPower"))
             throw std::invalid_argument("invalid params");
 
-        // 存在则修改，不存在则添加
-        int recordCount{0};
+        // 对于时段项, 存在则修改，不存在则添加
+        int durationRecordCount{0};
         XftgDb << "SELECT COUNT(*) FROM XFTG_DAYPLAN_DURATION WHERE NAME = ? AND DURATION_NAME = ?;"
-            << dayPlanName << item["durationName"].asString() >> recordCount;
-        if(recordCount > 0){
+            << dayPlanName << item["durationName"].asString() >> durationRecordCount;
+        if(durationRecordCount > 0){
             XftgDb << "UPDATE XFTG_DAYPLAN_DURATION SET "
                         "DURATION_BEGIN = ?, DURATION_END = ?, "
                         "CONTROL_TYPE = ?, TARGET_SOC = ?, TARGET_POWER = ? "
@@ -449,33 +347,8 @@ try
         }
     }
 
-    // 准备请求消息
-    string publishContent;
-    const string topic = miscellaneous::createFixedSizeString("XftgDayPlanDurationPut");
-    std::copy(topic.data(), topic.data() + topic.size(), std::back_inserter(publishContent));
-
-    // 发送消息
-    const vector<byte> sendmsg(reinterpret_cast<byte*>(publishContent.data()),
-                                reinterpret_cast<byte*>(publishContent.data()) + publishContent.size());
-    const bool sendResult = requester_->send(sendmsg);
-    if(!sendResult) throw std::runtime_error("zmq send err");
-
-    // 接收消息
-    const auto recvResult = requester_->recv();
-    if(!recvResult) throw std::runtime_error("zmq recv failed");
-    const auto recvmsg = recvResult.value();
-
-    // 先解析标准的响应消息
-    pair<bool, vector<byte>> respondMsg;
-    const bool unpackMsgResult = msgpackWrapper::unpack(recvmsg.data(), recvmsg.size(), respondMsg);
-    BOOST_ASSERT(unpackMsgResult);
-    const auto& [returnStatus, returnContent] = respondMsg;
-    if(!returnStatus){
-        // 再解析自定义的响应内容
-        const string errmsg(reinterpret_cast<const char*>(returnContent.data()),
-                                    reinterpret_cast<const char*>(returnContent.data()) + returnContent.size());
-        throw std::runtime_error(errmsg);
-    }
+    dealer_.send(zmq::message_t(putSubtitle_), zmq::send_flags::sndmore);
+    dealer_.send(zmq::message_t(), zmq::send_flags::none);
 
     // 保存'成功'操作记录
     const string status = "success";
@@ -491,7 +364,7 @@ try
     repJson["errmsg"] = "success";
     utils::httpRespond(res, repJson);
 }
-catch(const std::invalid_argument& e)
+catch(const std::exception& e)
 {
     Json::Value respondmsg;
     respondmsg["errcode"] = -1;

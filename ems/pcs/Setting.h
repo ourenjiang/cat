@@ -13,12 +13,15 @@ class Setting
 {
 public:
     Setting();
-    vector<byte> respondCallback(std::shared_ptr<StationInfo> stationInfo, const vector<byte>& msgbody) const;
+    void respondCallback(std::shared_ptr<StationInfo> stationInfo, zmq::socket_t& router,
+                        const vector<byte>& identity, const vector<byte>& subtitle, const vector<byte>& body) const;
+    vector<byte> identity();
 private:
     void registerHttpInterfaces();// 数据发布
     void requestCallback(const httplib::Request &req, httplib::Response &res);
 
-    std::unique_ptr<ZmqRequest> requester_;
+    const string identity_;
+    zmq::socket_t dealer_;
 };
 
 }//namespace pcs

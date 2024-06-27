@@ -10,29 +10,26 @@
 namespace ems
 {
 using namespace std;
-
+using PollerCallback = function<void(std::shared_ptr<StationInfo>&,
+                        zmq::socket_t&, const vector<byte>&, const vector<byte>&, const vector<byte>&)>;
+using RespondCallback = function<void(std::shared_ptr<StationInfo>&,
+                        zmq::socket_t&, const vector<byte>&, const vector<byte>&, const vector<byte>&)>;
 class Poller
 {
 public:
     Poller();
     void setStationInfo(std::shared_ptr<StationInfo> stationInfo){ stationInfo_ = stationInfo; }
-    void addSubscriber(const string& address, const vector<string>& topicList, 
-                        function<void(const string&, const string&)> readCallback);
+    void addSubscriber(const string& address, const vector<string>& topicList, PollerCallback callback);
+    void addRespondCallback(const vector<byte>& identity, RespondCallback callback);
     void doPoll();
-    void addRespondCallback(const string& key,
-                            function<vector<byte> (std::shared_ptr<StationInfo>, const vector<byte>&)> callback);
 private:
 
-    void doRespond();
+    void doRespond(std::shared_ptr<StationInfo>& stationInfo, zmq::socket_t& router, const vector<byte>& identity, const vector<byte>& subtitle, const vector<byte>& body);
 
     std::shared_ptr<StationInfo> stationInfo_;
-    zmq::context_t zmqContext_;
-    // vector<tuple<ZmqSubscribe, function<void(const string&)>>> handlers_;
-    vector<tuple<zmq::socket_t, function<void(const string&, const string&)>>> handlers_;
+    vector<zmq::socket_t> zmqSockets_;
     vector<zmq::pollitem_t> pollitems_;
-
-    unique_ptr<ZmqRespond> responser_;
-    int responserPollIndex_;
-    map<vector<byte>, function<vector<byte> (std::shared_ptr<StationInfo>, const vector<byte>&)>> respondCallbackMap_;
+    vector<PollerCallback> pollerCallbacks_;
+    map<vector<byte>, RespondCallback> respondCallbacks_;
 };
 }//namespace ems

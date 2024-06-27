@@ -7,7 +7,6 @@
 #include "DeviceTreeList.h"
 #include "HttpServer.h"
 #include "Poller.h"
-#include "HistoryWarning.h"
 #include "ems/bau/HeapSystem.h"
 #include "ems/bau/CellSystem.h"
 #include "ems/bau/RealtimeWarning.h"
@@ -27,6 +26,9 @@
 #include "ems/profit/TypeList.h"
 #include "ems/profit/DayPlan.h"
 #include "ems/profit/MonthPlan.h"
+
+#include "RealtimeWarning.h"
+#include "HistoryWarning.h"
 
 /**
  * 两件事：
@@ -58,19 +60,23 @@ private:
     void initBcuList(map<int, bau::BcuInfo>& bcuList, const vector<int>& bcuIndexListOnline, const int);
     void doXftgStrategy(BranchInfo& branchInfo);
     
-    void bauReceiveCallback(const string& topic, const string& body);
-    void parseBauTopicBauStatus(const string& message);
+    void bauReceiveCallback(std::shared_ptr<StationInfo>& stationInfo, zmq::socket_t& subscriber,
+                            const vector<byte>& topic, const vector<byte>& subtitle, const vector<byte>& body);
+    void parseBauTopicBauStatus(const vector<byte>& body);
 
     void updateBauWarningAndFaultMap(bau::BauInfo& bauInfo, const uint32_t warningLevel1Bits, const uint32_t warningLevel2Bits,
                                         const uint32_t warningLevel3Bits, const uint32_t faultBits);
     
-    void bcuReceiveCallback(const string& topic, const string& body);
+    void bcuReceiveCallback(std::shared_ptr<StationInfo>& stationInfo, zmq::socket_t& subscriber,
+                            const vector<byte>& topic, const vector<byte>& subtitle, const vector<byte>& body);
     void updateBcuWarningAndFaultMap(bau::BcuInfo& bcuInfo, const uint32_t warningLevel1Bits, const uint32_t warningLevel2Bits,
                                         const uint32_t warningLevel3Bits, const uint32_t faultBits);
 
-    void bmuReceiveCallback(const string& topic, const string& body);
+    void bmuReceiveCallback(std::shared_ptr<StationInfo>& stationInfo, zmq::socket_t& subscriber,
+                            const vector<byte>& topic, const vector<byte>& subtitle, const vector<byte>& body);
 
-    void pcsReceiveCallback(const string& topic, const string& body);
+    void pcsReceiveCallback(std::shared_ptr<StationInfo>& stationInfo, zmq::socket_t& subscriber,
+                            const vector<byte>& topic, const vector<byte>& subtitle, const vector<byte>& body);
     void updatePcsWarningAndFaultMap(pcs::PcsInfo& pcsInfo, const uint16_t warning1Bits, const uint16_t warning2Bits);
 
     log4cpp::Category& log_;
@@ -99,6 +105,7 @@ private:
     Profit profit_;
     PublicInfo publicInfo_;
     HistoryWarning historyWarning_;
+    RealtimeWarning realtimeWarning_;
     electricity_price::TypeList profitTypeList_;
     electricity_price::DayPlan profitDayPlan_;
     electricity_price::MonthPlan profitMonthPlan_;
@@ -106,7 +113,7 @@ private:
     DeviceTreeList deviceTreeList_;
 
     HttpServer httpServer_;
-    std::shared_ptr<ZmqPublish> xftgPublisher_;
+    zmq::socket_t xftgPublisher_;
     std::thread loopThread_;
 };
 }//namespace ems

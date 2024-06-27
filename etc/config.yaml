@@ -12,43 +12,23 @@ global:
 ## [ERROR, WARN, INFO, DEBUG]
 logger:
 [
-    {
-        name: MQServer,
-        priority: DEBUG
-    },
-    {
-        name: ProxyBau,
-        priority: DEBUG
-    },
-    {
-        name: ProxyPcs,
-        priority: DEBUG
-    },
-    {
-        name: CollectorBau,
-        priority: DEBUG
-    },
-    {
-        name: CollectorPcs,
-        priority: DEBUG
-    },
-    {
-        name: Interface,
-        priority: DEBUG
-    },
-    {
-        name: Xftg,
-        priority: DEBUG
-    },
-    {
-        name: Monitor,
-        priority: DEBUG
-    },
-    {
-        name: Station,
-        priority: DEBUG
-    }
+    { name: MQServer, priority: DEBUG },
+    { name: ProxyBau, priority: DEBUG },
+    { name: ProxyPcs, priority: DEBUG },
+    { name: CollectorBau, priority: DEBUG },
+    { name: CollectorPcs, priority: DEBUG },
+    { name: Interface, priority: DEBUG },
+    { name: Xftg, priority: DEBUG },
+    { name: Monitor, priority: DEBUG },
+    { name: Station, priority: DEBUG }
 ]
+
+# 数据接口
+dataInterface:
+{
+    # Http端口号
+    httpPort: 8902
+}
 
 ## 采集器
 collector:
@@ -69,8 +49,9 @@ collector:
         {
             type: ModbusTCP,
             slaveId: 1,
-            # address: 127.0.0.1:2502
-            address: 192.168.50.243:1502
+            address: 127.0.0.1:2502
+            # address: 192.168.49.1:9001
+            # address: 192.168.50.230:1502
         }
     },
     {
@@ -89,50 +70,48 @@ collector:
         {
             type: ModbusTCP,
             slaveId: 1,
-            address: 192.168.10.252:9001
-            # address: 127.0.0.1:8001
+            # address: 192.168.10.252:9001
+            address: 127.0.0.1:8001
         }
     }
 ]
 
-# 数据接口
-dataInterface:
+# 分支
+barnch0:
 {
-    # Http端口号
-    httpPort: 8901
-}
-
-# 控制策略
-strategy:
-{
-    # 削峰填谷
-    xftg:
+    bau:
     {
-        # 通讯地址
-        pcsAddress: tcp://192.168.10.251:5557
-    }
-}
-
-# modbus模拟器
-simulator:
-{
-    master:
-    {
-        slaveId: 1,
-        address: /dev/pts/6,
-        baud: 9600,
-        parity: 'N',
-        dataBit: 8,
-        stopBit: 1
+        masterAddress: tcp://127.0.0.1:5557,
+        proxyAddress: tcp://*:5557,
+        slave:
+        {
+            slaveId: 1,
+            address: 127.0.0.1:2502
+            # address: 192.168.49.1:9001
+            # address: 192.168.50.230:1502
+        },
+        slaveSimulator:
+        {
+            slaveId: 1,
+            address: 127.0.0.1:2502
+        }
     },
-    slave:
+    pcs:
     {
-        slaveId: 1,
-        address: /dev/pts/7,
-        baud: 9600,
-        parity: 'N',
-        dataBit: 8,
-        stopBit: 1
+        masterAddress: tcp://127.0.0.1:5558,
+        proxyAddress: tcp://*:5558,
+        slave:
+        {
+            slaveId: 1,
+            # address: 192.168.10.252:9001
+            address: 127.0.0.1:8001
+        },
+        slaveSimulator:
+        {
+            slaveId: 1,
+            # address: 192.168.10.252:9001
+            address: 127.0.0.1:8001
+        }
     }
 }
 

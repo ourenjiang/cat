@@ -6,7 +6,7 @@
 #include "utils/Miscellaneous.h"
 #include "utils/MsgpackWrapper_src.hpp"
 #include "ems/station/OperationRecord.h"
-#include "ems/station/AuthException.h"
+#include "utils/AuthException.h"
 #include "ems/station/UserManager.h"
 
 using namespace ems;
@@ -103,24 +103,9 @@ try
                         << jianInput << jianOutput << fengInput << fengOutput
                         << pingInput << pingOutput << guInput << guOutput;
 
+    // 这里只做通知，不同步获取结果.
     dealer_.send(zmq::message_t(postSubtitle_), zmq::send_flags::sndmore);
     dealer_.send(zmq::message_t(), zmq::send_flags::none);
-    // 接收消息
-    zmq::message_t rcvmsg;
-    (void)dealer_.recv(rcvmsg);
-
-
-    // 先解析标准的响应消息
-    pair<bool, vector<byte>> respondMsg;
-    const bool unpackMsgResult = msgpackWrapper::unpack(rcvmsg.data(), rcvmsg.size(), respondMsg);
-    BOOST_ASSERT(unpackMsgResult);
-    const auto& [returnStatus, returnContent] = respondMsg;
-    if(!returnStatus){
-        // 再解析自定义的响应内容
-        const string errmsg(reinterpret_cast<const char*>(returnContent.data()),
-                                    reinterpret_cast<const char*>(returnContent.data()) + returnContent.size());
-        throw std::runtime_error(errmsg);
-    }
 
     // 保存'成功'操作记录
     const string status = "success";
@@ -156,24 +141,9 @@ catch(const std::exception& e){
 void TypeList::respondCallback(std::shared_ptr<StationInfo> stationInfo, zmq::socket_t& router,
                         const vector<byte>& identity, const vector<byte>& subtitle, const vector<byte>& body) const
 {
-
-}   
-
-vector<byte> TypeList::respondCallbackPost(std::shared_ptr<StationInfo> stationInfo, const vector<byte>& msgbody, zmq::socket_t& router) const
-{
     // 重载数据库
-
-    // 返回结果
-    return miscellaneous::convertStringToBytes("success");
-}
-
-vector<byte> TypeList::respondCallbackPut(std::shared_ptr<StationInfo> stationInfo, const vector<byte>& msgbody, zmq::socket_t& router) const
-{
-    // 这里需要从数据库重新加载这部分记录.
-
-    // 返回结果
-    return miscellaneous::convertStringToBytes("success");
-}
+    // 不返回
+}   
 
 void TypeList::requestCallbackGet(const httplib::Request &req, httplib::Response &res)
 {
@@ -282,16 +252,6 @@ catch(const std::exception& e){
 }
 }
 
-vector<byte> TypeList::respondCallbackDelete(std::shared_ptr<StationInfo> stationInfo, const vector<byte>& msgbody, zmq::socket_t& router) const
-{
-    // 加载数据库
-
-    // 返回结果
-    const string result{ "success" };
-    return { reinterpret_cast<const byte*>(result.data()),
-            reinterpret_cast<const byte*>(result.data()) + result.size() };
-}
-
 void TypeList::requestCallbackDelete(const httplib::Request &req, httplib::Response &res)
 {
 try
@@ -341,25 +301,10 @@ try
     ElectricityPriceDb << "DELETE FROM ELECTRICITY_PRICE_TYPELIST WHERE NAME = ?;"
                         << typeListName;
 
+    // 这里只做通知，不同步获取结果.
     dealer_.send(zmq::message_t(deleteSubtitle_), zmq::send_flags::sndmore);
     dealer_.send(zmq::message_t(), zmq::send_flags::none);
-    // 接收消息
-    zmq::message_t rcvmsg;
-    (void)dealer_.recv(rcvmsg);
-
-    // 先解析标准的响应消息
-    pair<bool, vector<byte>> standardRespondMsg;
-    const bool standardUnpackResult = msgpackWrapper::unpack(rcvmsg.data(), rcvmsg.size(), standardRespondMsg);
-    BOOST_ASSERT(standardUnpackResult);
-    const auto& [returnStatus, returnContent] = standardRespondMsg;
-
-    // 再解析自定义的响应内容
-    if(!returnStatus){
-        const string errmsg(reinterpret_cast<const char*>(returnContent.data()),
-                            reinterpret_cast<const char*>(returnContent.data()) + returnContent.size());
-        throw std::runtime_error(errmsg);
-    }
-
+    
     Json::Value respondContent;
     respondContent["errcode"] = 0;
     respondContent["errmsg"] = "success";
@@ -432,18 +377,9 @@ try
                         << guInput << guOutput
                         << typeListName;
 
+    // 这里只做通知，不同步获取结果.
     dealer_.send(zmq::message_t(putSubtitle_), zmq::send_flags::sndmore);
     dealer_.send(zmq::message_t(), zmq::send_flags::none);
-    // 接收消息
-    zmq::message_t rcvmsg;
-    (void)dealer_.recv(rcvmsg);
-
-    // 先解析标准的响应消息
-    pair<bool, vector<byte>> respondMsg;
-    const bool unpackMsgResult = msgpackWrapper::unpack(rcvmsg.data(), rcvmsg.size(), respondMsg);
-    BOOST_ASSERT(unpackMsgResult);
-    const auto& [returnStatus, returnContent] = respondMsg;
-    if(!returnStatus) throw std::runtime_error("server operation failed");
 
     // 保存'成功'操作记录
     const string status { "success" };

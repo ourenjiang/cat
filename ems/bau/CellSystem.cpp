@@ -9,9 +9,12 @@ using namespace ems::bau;
 
 CellSystem::CellSystem()
     : log_(ems::Log4cppWrapper::getLogger(5))
+    , identity_("CellSystemGet")
+    , dealer_(miscellaneous::createZmqSocket(zmq::socket_type::dealer))
 {
     registerAllInterfaces();
-    requester_ = make_unique<ZmqRequest>("tcp://127.0.0.1:6200");
+    dealer_.set(zmq::sockopt::routing_id, identity_);
+    dealer_.connect("tcp://127.0.0.1:6200");
 }
 
 void CellSystem::registerAllInterfaces()
@@ -25,37 +28,26 @@ void CellSystem::requestCallback(const httplib::Request &req, httplib::Response 
 {
 try
 {
-    if(!req.has_param("bauIndex")
+    if(!req.has_param("branchIndex")
         || !req.has_param("bcuIndex") || !req.has_param("bmuIndex")){
         throw std::runtime_error("request params err");
     }
 
-    tuple<string, string, string> workParams{ req.get_param_value("bauIndex"),
+    tuple<string, string, string> workParams{ req.get_param_value("branchIndex"),
                                             req.get_param_value("bcuIndex"), req.get_param_value("bmuIndex") };
 
     // 准备请求参数
     auto serializedMsg = msgpackWrapper::pack(workParams);
-
-    // 准备请求消息
-    string publishContent;
-    const string topic = miscellaneous::createFixedSizeString("CellSystemGet");
-    std::copy(topic.data(), topic.data() + topic.size(), std::back_inserter(publishContent));
-    std::copy(serializedMsg.data(), serializedMsg.data() + serializedMsg.size(), std::back_inserter(publishContent));
-
-    // 发送消息
-    const vector<byte> sendmsg(reinterpret_cast<byte*>(publishContent.data()),
-                                reinterpret_cast<byte*>(publishContent.data()) + publishContent.size());
-    const bool sendResult = requester_->send(sendmsg);
-    if(!sendResult) throw std::runtime_error("zmq send err");
-
+    zmq::message_t sndmsg(serializedMsg.data(), serializedMsg.size());
+    dealer_.send(zmq::message_t(), zmq::send_flags::sndmore);
+    dealer_.send(sndmsg, zmq::send_flags::none);
     // 接收消息
-    const auto recvResult = requester_->recv();
-    if(!recvResult) throw std::runtime_error("zmq recv failed");
-    const auto recvmsg = recvResult.value();
+    zmq::message_t rcvmsg;
+    (void)dealer_.recv(rcvmsg);
 
     // 先解析标准的响应消息
     pair<bool, vector<byte>> respondMsg;
-    const bool unpackMsgResult = msgpackWrapper::unpack(recvmsg.data(), recvmsg.size(), respondMsg);
+    const bool unpackMsgResult = msgpackWrapper::unpack(rcvmsg.data(), rcvmsg.size(), respondMsg);
     BOOST_ASSERT(unpackMsgResult);
     const auto& [returnStatus, returnContent] = respondMsg;
     if(!returnStatus){
@@ -66,12 +58,12 @@ try
     }
 
     // 再解析自定义的响应内容
-    const string respondContent(reinterpret_cast<const char*>(returnContent.data()),
+    const string jsonString(reinterpret_cast<const char*>(returnContent.data()),
                                 reinterpret_cast<const char*>(returnContent.data()) + returnContent.size());
 
     // 成功响应
     Json::Value repJson;
-    repJson["data"] = miscellaneous::unserializedJson(respondContent);
+    repJson["data"] = miscellaneous::unserializedJson(jsonString);
     repJson["errcode"] = 0;
     repJson["errmsg"] = "success";
     utils::httpRespond(res, repJson);
@@ -85,10 +77,19 @@ catch(const std::exception& e){
 }
 }
 
-vector<byte> CellSystem::respondCallback(std::shared_ptr<StationInfo> stationInfo, const vector<byte>& msgbody) const
+vector<byte> CellSystem::identity()
+{
+    const auto beginItr = reinterpret_cast<const byte*>(identity_.data());
+    return { beginItr, beginItr + identity_.size() };
+}
+
+void CellSystem::respondCallback(std::shared_ptr<StationInfo> stationInfo, zmq::socket_t& router,
+                        const vector<byte>& identity, const vector<byte>& subtitle, const vector<byte>& body) const
+{
+try
 {
     tuple<string, string, string> reqbody;
-    const bool unpackResult = msgpackWrapper::unpack(msgbody.data(), msgbody.size(), reqbody);
+    const bool unpackResult = msgpackWrapper::unpack(body.data(), body.size(), reqbody);
     auto& [bauIndex, bcuIndex, bmuIndex] = reqbody;
 
     auto& branchList = stationInfo->branchList;
@@ -118,11 +119,27 @@ vector<byte> CellSystem::respondCallback(std::shared_ptr<StationInfo> stationInf
     root["celltem"] = bau::CellSystem::get_celltem(bmuInfo.celltemInfo);
     root["terminaltem"] = bau::CellSystem::get_terminaltem(bmuInfo.celltemInfo);
 
-    Json::StreamWriterBuilder builder;
-    builder["indentation"] = "";
-    const string jsonString = Json::writeString(builder, root);
-    return { reinterpret_cast<const byte*>(jsonString.data()),
-                reinterpret_cast<const byte*>(jsonString.data()) + jsonString.size() };
+    {
+        const vector<byte> repcontent = miscellaneous::serializedJsonAsBytes(root);
+        const pair<bool, vector<byte>> repbody{ true, repcontent };
+        const msgpack::sbuffer repbodySerialized = msgpackWrapper::pack(repbody);
+
+        zmq::message_t identitymsg(identity.data(), identity.size());
+        zmq::message_t repmsg(repbodySerialized.data(), repbodySerialized.size());
+        router.send(identitymsg, zmq::send_flags::sndmore);
+        router.send(repmsg, zmq::send_flags::none);
+    }
+}
+catch(const std::exception& e){
+    const vector<byte> repcontent = miscellaneous::convertStringToBytes(e.what());
+    const pair<bool, vector<byte>> repbody{ false, repcontent };
+    const msgpack::sbuffer repbodySerialized = msgpackWrapper::pack(repbody);
+
+    zmq::message_t identitymsg(identity.data(), identity.size());
+    zmq::message_t repmsg(repbodySerialized.data(), repbodySerialized.size());
+    router.send(identitymsg, zmq::send_flags::sndmore);
+    router.send(repmsg, zmq::send_flags::none);
+}
 }
 
 Json::Value CellSystem::get_statistic(const CellvoltSummary& cellvolt, const CelltemSummary& celltem)

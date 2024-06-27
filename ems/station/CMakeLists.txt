@@ -6,6 +6,7 @@ MainWiringDiagram.cpp
 StorageEnergySystem.cpp
 PublicInfo.cpp
 HistoryWarning.cpp
+RealtimeWarning.cpp
 OperationRecord.cpp
 DeviceTreelist.cpp
 Station.cpp

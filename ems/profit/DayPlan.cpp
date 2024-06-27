@@ -7,17 +7,26 @@
 #include "utils/Miscellaneous.h"
 #include "ems/station/OperationRecord.h"
 #include "ems/station/UserManager.h"
-#include "ems/station/AuthException.h"
+#include "utils/AuthException.h"
 
 using namespace ems;
 using namespace ems::electricity_price;
 
 DayPlan::DayPlan()
+    : identity_("ElectricityPriceDayPlan")
+    , dealer_(miscellaneous::createZmqSocket(zmq::socket_type::dealer))
 {
     createTable();
     insertIntoDefaultRecord();
     registerHttpInterfaces();
-    requester_ = make_unique<ZmqRequest>("tcp://127.0.0.1:6200");
+    dealer_.set(zmq::sockopt::routing_id, identity_);
+    dealer_.connect("tcp://127.0.0.1:6200");
+}
+
+vector<byte> DayPlan::identity()
+{
+    const auto beginItr = reinterpret_cast<const byte*>(identity_.data());
+    return { beginItr, beginItr + identity_.size() };
 }
 
 void DayPlan::registerHttpInterfaces()
@@ -31,30 +40,11 @@ void DayPlan::registerHttpInterfaces()
     serv.Put("/xftg/electricityPrice/dayPlan", httplib::Server::Handler(bind(&DayPlan::requestCallbackPut, this, _1, _2)));
 }
 
-vector<byte> DayPlan::respondCallbackPost(std::shared_ptr<StationInfo> stationInfo, const vector<byte>& msgbody) const
+void DayPlan::respondCallback(std::shared_ptr<StationInfo> stationInfo, zmq::socket_t& router,
+                        const vector<byte>& identity, const vector<byte>& subtitle, const vector<byte>& body) const
 {
-    // 这里需要从数据库重新加载这部分记录.
 
-    // 返回结果
-    return miscellaneous::convertStringToBytes("success");
-}
-
-vector<byte> DayPlan::respondCallbackPut(std::shared_ptr<StationInfo> stationInfo, const vector<byte>& msgbody) const
-{
-    // 需要重新加载
-
-    // 返回结果
-    return miscellaneous::convertStringToBytes("success");
-}
-
-vector<byte> DayPlan::respondCallbackDelete(std::shared_ptr<StationInfo> stationInfo, const vector<byte>& msgbody) const
-{
-    string name;
-    const bool unpackResult = msgpackWrapper::unpack(msgbody.data(), msgbody.size(), name);
-
-    // 重新加载数据库
-    return miscellaneous::convertStringToBytes("success");
-}
+}   
 
 void DayPlan::requestCallbackPost(const httplib::Request &req, httplib::Response &res)
 {
@@ -109,34 +99,9 @@ try
                         << item["durationBegin"].asString() << item["durationEnd"].asString();
     }
 
-    // 准备请求消息
-    string publishContent;
-    const string topic = miscellaneous::createFixedSizeString("ElectricityPriceDayPlanPost");
-    std::copy(topic.data(), topic.data() + topic.size(), std::back_inserter(publishContent));
-
-    // 发送消息
-    const vector<byte> sendmsg(reinterpret_cast<byte*>(publishContent.data()),
-                                reinterpret_cast<byte*>(publishContent.data()) + publishContent.size());
-    const bool sendResult = requester_->send(sendmsg);
-    if(!sendResult) throw std::runtime_error("zmq send err");
-
-    // 接收消息
-    const auto recvResult = requester_->recv();
-    if(!recvResult) throw std::runtime_error("zmq recv failed");
-    const auto recvmsg = recvResult.value();
-
-    // 先解析标准的响应消息
-    pair<bool, vector<byte>> respondMsg;
-    const bool unpackMsgResult = msgpackWrapper::unpack(recvmsg.data(), recvmsg.size(), respondMsg);
-    BOOST_ASSERT(unpackMsgResult);
-    const auto& [returnStatus, returnContent] = respondMsg;
-    if(!returnStatus){
-        // 再解析自定义的响应内容
-        const string errmsg(reinterpret_cast<const char*>(returnContent.data()),
-                                    reinterpret_cast<const char*>(returnContent.data()) + returnContent.size());
-        throw std::runtime_error(errmsg);
-    }
-
+    // 通知中心
+    dealer_.send(zmq::message_t(postSubtitle_), zmq::send_flags::sndmore);
+    dealer_.send(zmq::message_t(), zmq::send_flags::none);
     // 保存'成功'操作记录
     const string status = "success";
     const string content{ "success" };
@@ -268,9 +233,22 @@ void DayPlan::requestCallbackDelete(const httplib::Request &req, httplib::Respon
 {
 try
 {
-    if(!req.has_param("name"))
+    const auto reqbody = miscellaneous::unserializedJson(req.body);
+
+    /* 鉴权 */
+    Json::Value auth;
+    if(!reqbody.isMember("auth"))
         throw std::runtime_error("request params err");
-    const string dayPlanName = req.get_param_value("name");
+    auth = reqbody["auth"];
+    if(!auth.isMember("username") || !auth.isMember("password"))
+        throw std::runtime_error("request params err");
+    if(!UserManager::doAuth(auth["username"].asString(), auth["password"].asString()))
+        throw std::runtime_error("auth failed");
+
+    /** 解析业务参数 */
+    if(!reqbody.isMember("name"))
+        throw std::runtime_error("request params err");
+    const string dayPlanName = reqbody["name"].asString();
 
     const string projectPath{ "/opt/paceic_ems_server/main" };
     const string dbPath{ projectPath + "/db" };
@@ -301,36 +279,9 @@ try
     ElectricityPriceDb << "DELETE FROM ELECTRICITY_PRICE_DAYPLAN WHERE NAME = ?;"
                         << dayPlanName;
 
-    // 准备请求消息
-    string publishContent;
-    auto serializedMsg = msgpackWrapper::pack(dayPlanName);
-    const string topic = miscellaneous::createFixedSizeString("ElectricityPriceDayPlanDelete");
-    std::copy(topic.data(), topic.data() + topic.size(), std::back_inserter(publishContent));
-    std::copy(serializedMsg.data(), serializedMsg.data() + serializedMsg.size(), std::back_inserter(publishContent));
-
-    // 发送消息
-    const vector<byte> sendmsg(reinterpret_cast<byte*>(publishContent.data()),
-                                reinterpret_cast<byte*>(publishContent.data()) + publishContent.size());
-    const bool sendResult = requester_->send(sendmsg);
-    if(!sendResult) throw std::runtime_error("zmq send err");
-
-    // 接收消息
-    const auto recvResult = requester_->recv();
-    if(!recvResult) throw std::runtime_error("zmq recv failed");
-    const auto recvmsg = recvResult.value();
-
-    // 先解析标准的响应消息
-    pair<bool, vector<byte>> standardRespondMsg;
-    const bool standardUnpackResult = msgpackWrapper::unpack(recvmsg.data(), recvmsg.size(), standardRespondMsg);
-    BOOST_ASSERT(standardUnpackResult);
-    const auto& [returnStatus, returnContent] = standardRespondMsg;
-
-    // 再解析自定义的响应内容
-    if(!returnStatus){
-        const string errmsg(reinterpret_cast<const char*>(returnContent.data()),
-                            reinterpret_cast<const char*>(returnContent.data()) + returnContent.size());
-        throw std::runtime_error(errmsg);
-    }
+    // 通知中心
+    dealer_.send(zmq::message_t(deleteSubtitle_), zmq::send_flags::sndmore);
+    dealer_.send(zmq::message_t(), zmq::send_flags::none);
 
     Json::Value respondContent;
     respondContent["errcode"] = 0;
@@ -399,38 +350,9 @@ try
                             << dayPlanName << item["durationName"].asString();
     }
     
-    // 准备请求参数
-    auto serializedMsg = msgpackWrapper::pack(dayPlanName);
-
-    // 准备请求消息
-    string publishContent;
-    const string topic = miscellaneous::createFixedSizeString("ElectricityPriceDayPlanPut");
-    std::copy(topic.data(), topic.data() + topic.size(), std::back_inserter(publishContent));
-    std::copy(serializedMsg.data(), serializedMsg.data() + serializedMsg.size(), std::back_inserter(publishContent));
-
-    // 发送消息
-    const vector<byte> sendmsg(reinterpret_cast<byte*>(publishContent.data()),
-                                reinterpret_cast<byte*>(publishContent.data()) + publishContent.size());
-    const bool sendResult = requester_->send(sendmsg);
-    if(!sendResult) throw std::runtime_error("zmq send err");
-
-    // 接收消息
-    const auto recvResult = requester_->recv();
-    if(!recvResult) throw std::runtime_error("zmq recv failed");
-    const auto recvmsg = recvResult.value();
-
-    // 先解析标准的响应消息
-    pair<bool, vector<byte>> respondMsg;
-    const bool unpackMsgResult = msgpackWrapper::unpack(recvmsg.data(), recvmsg.size(), respondMsg);
-    BOOST_ASSERT(unpackMsgResult);
-    const auto& [returnStatus, returnContent] = respondMsg;
-    if(!returnStatus){
-        // 再解析自定义的响应内容
-        const string errmsg(reinterpret_cast<const char*>(returnContent.data()),
-                                    reinterpret_cast<const char*>(returnContent.data()) + returnContent.size());
-        throw std::runtime_error(errmsg);
-    }
-
+    //通知中心
+    dealer_.send(zmq::message_t(putSubtitle_), zmq::send_flags::sndmore);
+    dealer_.send(zmq::message_t(), zmq::send_flags::none);
     // 保存'成功'操作记录
     const string status { "success" };
     const string content{ "success" };

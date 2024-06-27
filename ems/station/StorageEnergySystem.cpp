@@ -8,9 +8,18 @@ using namespace ems;
 
 StorageEnergySystem::StorageEnergySystem()
     : log_(ems::Log4cppWrapper::getLogger(5))
+    , identity_("StorageEnergySystemGet")
+    , dealer_(miscellaneous::createZmqSocket(zmq::socket_type::dealer))
 {
     registerAllInterfaces();
-    requester_ = make_unique<ZmqRequest>("tcp://127.0.0.1:6200");
+    dealer_.set(zmq::sockopt::routing_id, identity_);
+    dealer_.connect("tcp://127.0.0.1:6200");
+}
+
+vector<byte> StorageEnergySystem::identity()
+{
+    const auto beginItr = reinterpret_cast<const byte*>(identity_.data());
+    return { beginItr, beginItr + identity_.size() };
 }
 
 void StorageEnergySystem::registerAllInterfaces()
@@ -24,46 +33,15 @@ void StorageEnergySystem::requestCallback(const httplib::Request &req, httplib::
 {
 try
 {
-    // Json::Value respondmsg;
-    // respondmsg["errcode"] = 0;
-    // respondmsg["errmsg"] = "success";
-
-    // auto handleResult = handleGetHttp();
-    // if(handleResult.first){
-
-    //     string& jsonString = handleResult.second;
-
-    //     JSONCPP_STRING err;
-    //     Json::Value root;
-    //     Json::CharReaderBuilder builder;
-    //     const unique_ptr<Json::CharReader> reader(builder.newCharReader());
-    //     if (!reader->parse(jsonString.data(), jsonString.data() + jsonString.length(), &root, &err)){
-    //         throw std::invalid_argument("parse json string err");
-    //     }
-        
-    //     respondmsg["data"] = root;
-    // }
-    // utils::httpRespond(res, respondmsg);
-
-    // 准备请求消息
-    string publishContent;
-    const string topic = miscellaneous::createFixedSizeString("StorageEnergySystemGet");
-    std::copy(topic.data(), topic.data() + topic.size(), std::back_inserter(publishContent));
-
-    // 发送消息
-    const vector<byte> sendmsg(reinterpret_cast<byte*>(publishContent.data()),
-                                reinterpret_cast<byte*>(publishContent.data()) + publishContent.size());
-    const bool sendResult = requester_->send(sendmsg);
-    if(!sendResult) throw std::runtime_error("zmq send err");
-
+    dealer_.send(zmq::message_t(), zmq::send_flags::sndmore);
+    dealer_.send(zmq::message_t(), zmq::send_flags::none);
     // 接收消息
-    const auto recvResult = requester_->recv();
-    if(!recvResult) throw std::runtime_error("zmq recv failed");
-    const auto recvmsg = recvResult.value();
+    zmq::message_t rcvmsg;
+    (void)dealer_.recv(rcvmsg);
 
     // 先解析标准的响应消息
     pair<bool, vector<byte>> respondMsg;
-    const bool unpackMsgResult = msgpackWrapper::unpack(recvmsg.data(), recvmsg.size(), respondMsg);
+    const bool unpackMsgResult = msgpackWrapper::unpack(rcvmsg.data(), rcvmsg.size(), respondMsg);
     BOOST_ASSERT(unpackMsgResult);
     const auto& [returnStatus, returnContent] = respondMsg;
     if(!returnStatus){
@@ -91,39 +69,6 @@ catch(const std::exception& e){
     respondmsg["errmsg"] = e.what();
     utils::httpRespond(res, respondmsg);
 }
-}
-
-pair<bool, string> StorageEnergySystem::handleGetHttp()
-{
-    try
-    {
-        const string topic = miscellaneous::createFixedSizeString("StorageEnergySystemGet");
-
-        string requestMessage;
-        std::copy(topic.data(), topic.data() + topic.size(), std::back_inserter(requestMessage));
-
-        const vector<byte> sendmsg(reinterpret_cast<byte*>(requestMessage.data()),
-                                reinterpret_cast<byte*>(requestMessage.data()) + requestMessage.size());
-        const bool sendResult = requester_->send(sendmsg);
-        if(!sendResult){
-            throw std::runtime_error("send err");
-        }
-
-        // 接收
-        const auto recvResult = requester_->recv();
-        if(!recvResult.has_value()){
-            throw std::runtime_error("recv err");
-        }
-        const auto recvmsg = recvResult.value();
-
-        pair<bool, string> respondMsg;
-        const bool unpackResult = msgpackWrapper::unpack(recvmsg.data(), recvmsg.size(), respondMsg);
-        return respondMsg;
-    }
-    catch(const std::exception& e){
-        return { false, e.what() };
-    }
-    return {};
 }
 
 Json::Value StorageEnergySystem::get_trend(const StationInfo& stationInfo)
@@ -321,7 +266,10 @@ Json::Value StorageEnergySystem::get_peak(const bau::BauStatusSummary& bauStatus
     return content;
 }
 
-vector<byte> StorageEnergySystem::respondCallback(std::shared_ptr<StationInfo> stationInfo, const vector<byte>& reqmsg)
+void StorageEnergySystem::respondCallback(std::shared_ptr<StationInfo> stationInfo, zmq::socket_t& router,
+                        const vector<byte>& identity, const vector<byte>& subtitle, const vector<byte>& body)
+{
+try
 {
     Json::Value root;
     root["trend"] = StorageEnergySystem::get_trend(*stationInfo);
@@ -334,5 +282,26 @@ vector<byte> StorageEnergySystem::respondCallback(std::shared_ptr<StationInfo> s
     const auto& pcs_frame_0406_0460_summary = branchInfo->pcsInfo.frame_0406_0460_summary;
     root["warning"] = StorageEnergySystem::get_warning(bauStatusSummary, pcs_frame_0406_0460_summary);
     root["peak"] = StorageEnergySystem::get_peak(bauStatusSummary);
-    return miscellaneous::serializedJsonAsBytes(root);
+
+    {
+        const vector<byte> repcontent = miscellaneous::serializedJsonAsBytes(root);
+        const pair<bool, vector<byte>> repbody{ true, repcontent };
+        const msgpack::sbuffer repbodySerialized = msgpackWrapper::pack(repbody);
+
+        zmq::message_t identitymsg(identity.data(), identity.size());
+        zmq::message_t repmsg(repbodySerialized.data(), repbodySerialized.size());
+        router.send(identitymsg, zmq::send_flags::sndmore);
+        router.send(repmsg, zmq::send_flags::none);
+    }
+}
+catch(const std::exception& e){
+    const vector<byte> repcontent = miscellaneous::convertStringToBytes(e.what());
+    const pair<bool, vector<byte>> repbody{ false, repcontent };
+    const msgpack::sbuffer repbodySerialized = msgpackWrapper::pack(repbody);
+
+    zmq::message_t identitymsg(identity.data(), identity.size());
+    zmq::message_t repmsg(repbodySerialized.data(), repbodySerialized.size());
+    router.send(identitymsg, zmq::send_flags::sndmore);
+    router.send(repmsg, zmq::send_flags::none);
+}
 }

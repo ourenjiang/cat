@@ -5,18 +5,27 @@
 #include "utils/Miscellaneous.h"
 #include "utils/MsgpackWrapper_src.hpp"
 #include "ems/station/UserManager.h"
-#include "ems/station/AuthException.h"
+#include "utils/AuthException.h"
 #include "ems/station/OperationRecord.h"
 
 using namespace ems;
 using namespace ems::xftg;
 
 Setting::Setting()
+    : identity_("XftgAutoRun")
+    , dealer_(miscellaneous::createZmqSocket(zmq::socket_type::dealer))
 {
     createTable();
     insertIntoDefaultRecord();
     registerHttpInterfaces();
-    requester_ = make_unique<ZmqRequest>("tcp://127.0.0.1:6200");
+    dealer_.set(zmq::sockopt::routing_id, identity_);
+    dealer_.connect("tcp://127.0.0.1:6200");
+}
+
+vector<byte> Setting::identity()
+{
+    const auto beginItr = reinterpret_cast<const byte*>(identity_.data());
+    return { beginItr, beginItr + identity_.size() };
 }
 
 void Setting::registerHttpInterfaces()
@@ -89,33 +98,9 @@ try
     XftgDb << "UPDATE AUTO_RUN SET FLAG = ? WHERE BRANCH_INDEX = ?;"
             << autoRunFlag << branchIndex;
 
-    // 准备请求消息
-    string publishContent;
-    const string topic = miscellaneous::createFixedSizeString("XftgAutoRunPut");
-    std::copy(topic.data(), topic.data() + topic.size(), std::back_inserter(publishContent));
-
-    // 发送消息
-    const vector<byte> sendmsg(reinterpret_cast<byte*>(publishContent.data()),
-                                reinterpret_cast<byte*>(publishContent.data()) + publishContent.size());
-    const bool sendResult = requester_->send(sendmsg);
-    if(!sendResult) throw std::runtime_error("zmq send err");
-
-    // 接收消息
-    const auto recvResult = requester_->recv();
-    if(!recvResult.has_value()) throw std::runtime_error("zmq recv err");
-    const auto recvmsg = recvResult.value();
-
-    // 先解析标准的响应消息
-    pair<bool, vector<byte>> respondMsg;
-    const bool unpackMsgResult = msgpackWrapper::unpack(recvmsg.data(), recvmsg.size(), respondMsg);
-    BOOST_ASSERT(unpackMsgResult);
-    const auto& [returnStatus, returnContent] = respondMsg;
-    if(!returnStatus){
-        // 再解析自定义的响应内容
-        const string errmsg(reinterpret_cast<const char*>(returnContent.data()),
-                                    reinterpret_cast<const char*>(returnContent.data()) + returnContent.size());
-        throw std::runtime_error(errmsg);
-    }
+    // 通知中心
+    dealer_.send(zmq::message_t(), zmq::send_flags::sndmore);
+    dealer_.send(zmq::message_t(), zmq::send_flags::none);
 
     // 成功响应
     Json::Value repJson;
@@ -131,7 +116,8 @@ catch(const std::exception& e){
 }
 }
 
-vector<byte> Setting::respondPutCallback(std::shared_ptr<StationInfo> stationInfo, const vector<byte>& msgbody) const
+vector<byte> Setting::respondCallback(std::shared_ptr<StationInfo> stationInfo, zmq::socket_t& router,
+                        const vector<byte>& identity, const vector<byte>& subtitle, const vector<byte>& body) const
 {
     // 这里需要从数据库重新加载这部分记录.
 

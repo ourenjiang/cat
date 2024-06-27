@@ -3,7 +3,7 @@
 #include "sqlite_modern_cpp.h"
 #include "utils/Miscellaneous.h"
 #include "ems/station/OperationRecord.h"
-#include "ems/station/AuthException.h"
+#include "utils/AuthException.h"
 
 using namespace ems;
 
@@ -50,12 +50,12 @@ void UserManager::registerCallbacks()
     using namespace std::placeholders;
     using httplib::Server;
     auto& serv = utils::getHttpServerSingleton();
-    serv.Get("/user", bind(&UserManager::getCallback, this, _1, _2));
     serv.Get("/user/namelist", bind(&UserManager::getNameListCallback, this, _1, _2));
-    serv.Post("/user/all", Server::Handler(bind(&UserManager::getAllCallback, this, _1, _2)));
-    serv.Post("/user", Server::Handler(bind(&UserManager::postCallback, this, _1, _2)));
-    serv.Put("/user", Server::Handler(bind(&UserManager::putCallback, this, _1, _2)));
-    serv.Delete("/user", Server::Handler(bind(&UserManager::deleteCallback, this, _1, _2)));
+    serv.Post("/user/info/query", Server::Handler(bind(&UserManager::getCallback, this, _1, _2)));
+    serv.Post("/user/info/queryAll", Server::Handler(bind(&UserManager::getAllCallback, this, _1, _2)));
+    serv.Post("/user/info/add", Server::Handler(bind(&UserManager::postCallback, this, _1, _2)));
+    serv.Post("/user/info/modify", Server::Handler(bind(&UserManager::putCallback, this, _1, _2)));
+    serv.Post("/user/info/delete", Server::Handler(bind(&UserManager::deleteCallback, this, _1, _2)));
 }
 
 bool UserManager::doAuth(const string& username, const string& password)
@@ -84,22 +84,31 @@ void UserManager::getCallback(const httplib::Request &req, httplib::Response &re
 {
 try
 {
+    const auto reqbody = miscellaneous::unserializedJson(req.body);
+
+    //* 解析鉴权信息 */
+    if(!reqbody.isMember("auth"))
+        throw std::runtime_error("request params err");
+    const auto& auth = reqbody["auth"];
+    if(!auth.isMember("username") || !auth.isMember("password"))
+        throw std::runtime_error("request params err");
+    const string usernameAuth = auth["username"].asString();
+    const string passwordAuth = auth["password"].asString();
+    if(!doAuth(usernameAuth, passwordAuth))
+        throw std::runtime_error("auth failed");
+    const string username = reqbody["username"].asString();
+
+    // 打开数据库
     auto& cfgRoot = YamlcppWrapper::getRoot();
     const string rootPath = cfgRoot["global"]["rootPath"].as<string>();
     const string dbPath = cfgRoot["global"]["dbPath"].as<string>();
     const string dbname = rootPath + dbPath + "/Users.sqlite";
     sqlite::database db_users(dbname);
 
-    // 请求参数校验
-    if(!req.has_param("username") || !req.has_param("password"))
-        throw std::runtime_error("rquest params err");
-    const string username = req.get_param_value("username");
-    const string password = req.get_param_value("password");
-
     // 查询记录
     optional<tuple<string, string, string>> record;
-    db_users << "SELECT GRADE, PHONE, EMAIL FROM USER WHERE NAME = ? AND PASSWORD = ?;"
-        << username << password >> [&](string grade, string phone, string email){
+    db_users << "SELECT GRADE, PHONE, EMAIL FROM USER WHERE NAME = ?;"
+        << username >> [&](string grade, string phone, string email){
         record.emplace(grade, phone, email);
     };
     if(!record.has_value())
@@ -107,12 +116,11 @@ try
     const auto& [grade, phone, email] = record.value();
 
     //记录操作日志
-    OperationRecord::insertRecord("成功", "查询用户信息", "用户管理", username);
+    OperationRecord::insertRecord("成功", "查询用户信息", "用户管理", usernameAuth);
 
     // 成功响应
     Json::Value respondContent;
     auto& data = respondContent["data"];
-    data["username"] = username;
     data["grade"] = grade;
     data["phone"] = phone;
     data["email"] = email;
@@ -140,6 +148,7 @@ void UserManager::getNameListCallback(const httplib::Request &req, httplib::Resp
 {
 try
 {
+    // 打开数据库
     auto& cfgRoot = YamlcppWrapper::getRoot();
     const string rootPath = cfgRoot["global"]["rootPath"].as<string>();
     const string dbPath = cfgRoot["global"]["dbPath"].as<string>();
@@ -172,13 +181,7 @@ try
 {
     const auto reqbody = miscellaneous::unserializedJson(req.body);
 
-    auto& cfgRoot = YamlcppWrapper::getRoot();
-    const string rootPath = cfgRoot["global"]["rootPath"].as<string>();
-    const string dbPath = cfgRoot["global"]["dbPath"].as<string>();
-    const string dbname = rootPath + dbPath + "/Users.sqlite";
-    sqlite::database db_users(dbname);
-
-    //* 解析鉴权信息 */
+    /* 解析鉴权信息 */
     if(!reqbody.isMember("auth"))
         throw std::runtime_error("request params err");
     const auto& auth = reqbody["auth"];
@@ -186,6 +189,15 @@ try
         throw std::runtime_error("request params err");
     const string username = auth["username"].asString();
     const string password = auth["password"].asString();
+    if(!doAuth(username, password))
+        throw std::runtime_error("auth failed");
+
+    // 打开数据库
+    auto& cfgRoot = YamlcppWrapper::getRoot();
+    const string rootPath = cfgRoot["global"]["rootPath"].as<string>();
+    const string dbPath = cfgRoot["global"]["dbPath"].as<string>();
+    const string dbname = rootPath + dbPath + "/Users.sqlite";
+    sqlite::database db_users(dbname);
 
     // 查询用户级别
     optional<string> grade;
@@ -193,8 +205,7 @@ try
         << username << password >> [&](string columnGrade){
         grade = columnGrade;
     };
-    if(!grade.has_value())
-        throw std::runtime_error("auth failed");
+    BOOST_ASSERT(grade.has_value());
 
     using Record = tuple<string, string, string, string, string>;
     vector<Record> records;
@@ -245,24 +256,24 @@ try
     const auto& auth = reqbody["auth"];
     if(!auth.isMember("username") || !auth.isMember("password"))
         throw std::runtime_error("request params err");
-    const string authUsername = auth["username"].asString();
-    const string authPassword = auth["password"].asString();
+    const string usernameAuth = auth["username"].asString();
+    const string passwordAuth = auth["password"].asString();
     
     /* 鉴权 */
     optional<int> authGrade;
     db_users << "SELECT GRADE FROM USER WHERE NAME = ? AND PASSWORD = ?;"
-        << authUsername << authPassword >> [&](int columnGrade){
+        << usernameAuth << passwordAuth >> [&](int columnGrade){
         authGrade = columnGrade;
     };
     if(!authGrade.has_value())
         throw std::runtime_error("auth failed");
     if(authGrade.value() > 0)
-        throw AuthException("auth grade failed", authUsername);
+        throw AuthException("auth grade failed", usernameAuth);
 
     // username, password, grade
     if(!reqbody.isMember("username")
        || !reqbody.isMember("password") || !reqbody.isMember("grade"))
-        throw AuthException("request params err", authUsername);
+        throw AuthException("request params err", usernameAuth);
     const string username = reqbody["username"].asString();
     const string password = reqbody["password"].asString();
     const string grade = reqbody["grade"].asString();
@@ -278,14 +289,14 @@ try
     db_users << "SELECT COUNT(*) FROM USER WHERE NAME = ?;"
         << username >> recordCount;
     if(recordCount > 0)
-        throw AuthException("用户已存在", authUsername);
+        throw AuthException("用户已存在", usernameAuth);
 
     // exec sql
     db_users << "INSERT INTO USER (NAME, PASSWORD, GRADE, PHONE, EMAIL) VALUES (?, ?, ?, ?, ?);"
                 << username << password << grade << phone << email;
     
     //记录正常操作日志
-    OperationRecord::insertRecord("成功", "添加用户", "用户管理", authUsername);
+    OperationRecord::insertRecord("成功", "添加用户", "用户管理", usernameAuth);
 
     Json::Value respondContent;
     respondContent["message"] = "success";
@@ -326,71 +337,50 @@ try
     const auto& auth = reqbody["auth"];
     if(!auth.isMember("username") || !auth.isMember("password"))
         throw std::runtime_error("request params err");
-    const string authUsername = auth["username"].asString();
-    const string authPassword = auth["password"].asString();
+    const string usernameAuth = auth["username"].asString();
+    const string passwordAuth = auth["password"].asString();
     
     /* 鉴权 */
     optional<string> gradeAuth;
     db_users << "SELECT GRADE FROM USER WHERE NAME = ? AND PASSWORD = ?;"
-        << authUsername << authPassword >> [&](string columnGrade){
+        << usernameAuth << passwordAuth >> [&](string columnGrade){
         gradeAuth = columnGrade;
     };
     if(!gradeAuth.has_value())
         throw std::runtime_error("auth failed");
 
     // 必须根据用户名，定位需要修改的记录
-    if(!reqbody.isMember("usernameOld"))
+    if(!reqbody.isMember("username"))
         throw std::runtime_error("request params err");
-    const string usernameOld = reqbody["usernameOld"].asString();
+    const string username = reqbody["username"].asString();
     // 原记录参数
     optional<tuple<string, string, string, string>> recordOld;
-    db_users << "SELECT PASSWORD, GRADE, PHONE, EMAIL FROM USER WHERE NAME = ?;" << usernameOld
+    db_users << "SELECT PASSWORD, GRADE, PHONE, EMAIL FROM USER WHERE NAME = ?;" << username
     >> [&](string password, string grade, string phone, string email){
         recordOld.emplace(password, grade, phone, email);
     };
     if(!recordOld.has_value())
-        throw AuthException("修改的用户名不存在", authUsername);
+        throw AuthException("用户不存在", usernameAuth);
     auto& [passwordOld, gradeOld, phoneOld, emailOld] = recordOld.value();
     // 针对等级进行鉴权
     if(gradeOld < gradeAuth.value())
-        throw AuthException("权限不足", authUsername);
+        throw AuthException("权限不足", usernameAuth);
 
-    optional<string> passwordNew;
+    string passwordNew = passwordOld;
+    string gradeNew = gradeOld;
+    string phoneNew = phoneOld;
+    string emailNew = emailOld;
     if(reqbody.isMember("passwordNew")) passwordNew = reqbody["passwordNew"].asString();
-    optional<string> gradeNew;
     if(reqbody.isMember("gradeNew")) gradeNew = reqbody["gradeNew"].asString();
-    optional<string> phoneNew;
     if(reqbody.isMember("phoneNew")) phoneNew = reqbody["phoneNew"].asString();
-    optional<string> emailNew;
     if(reqbody.isMember("emailNew")) emailNew = reqbody["emailNew"].asString();
 
-    const string passwordNewValue = passwordNew.has_value() ? passwordNew.value() : passwordOld;
-    const string gradeNewValue = gradeNew.has_value() ? gradeNew.value() : gradeOld;
-    const string phoneNewValue = phoneNew.has_value() ? phoneNew.value() : phoneOld;
-    const string emailNewValue = emailNew.has_value() ? phoneNew.value() : emailOld;
-    // 需要修改用户名，但由于主键不允许修改，因此先保存旧信息并删除旧记录
-    if(reqbody.isMember("usernameNew")){
-        // 先检查用户提供的新用户名是否存在
-        const string usernameNewValue = reqbody["usernameNew"].asString();
-        int usernameNewRecordCount{ 0 };
-        db_users << "SELECT COUNT(*) FROM USER WHERE NAME = ?;" << usernameNewValue >> usernameNewRecordCount;
-        if(usernameNewRecordCount > 0)
-            throw AuthException("新用户名已存在", authUsername);
-        
-        // 删除旧记录
-        db_users << "DELETE FROM USER WHERE NAME = ?;" << usernameOld;
-        // 添加修改后的记录
-        db_users << "INSERT INTO USER (NAME, PASSWORD, GRADE, PHONE, EMAIL) VALUES (?, ?, ?, ?, ?);"
-                    << usernameNewValue << passwordNewValue << gradeNewValue << phoneNewValue << emailNewValue;
-    }
-    else{
-        // 修改
-        db_users << "UPDATE USER SET PASSWORD=?, GRADE=?, PHONE=?, EMAIL=? WHERE NAME = ?;"
-                    << passwordNewValue << gradeNewValue << phoneNewValue << emailNewValue << usernameOld;
-    }
+    // 修改
+    db_users << "UPDATE USER SET PASSWORD=?, GRADE=?, PHONE=?, EMAIL=? WHERE NAME = ?;"
+                << passwordNew << gradeNew << phoneNew << emailNew << username;
 
     //记录操作日志
-    OperationRecord::insertRecord("成功", "修改用户信息", "用户管理", authUsername);
+    OperationRecord::insertRecord("成功", "修改用户信息", "用户管理", usernameAuth);
 
     Json::Value respondContent;
     respondContent["message"] = "success";
@@ -431,13 +421,13 @@ try
     const auto& auth = reqbody["auth"];
     if(!auth.isMember("username") || !auth.isMember("password"))
         throw std::runtime_error("request params err");
-    const string authUsername = auth["username"].asString();
-    const string authPassword = auth["password"].asString();
+    const string usernameAuth = auth["username"].asString();
+    const string passwordAuth = auth["password"].asString();
 
     /* 鉴权 */
     optional<string> gradeAuth;
     db_users << "SELECT GRADE FROM USER WHERE NAME = ? AND PASSWORD = ?;"
-        << authUsername << authPassword >> [&](string columnGrade){
+        << usernameAuth << passwordAuth >> [&](string columnGrade){
         gradeAuth = columnGrade;
     };
     if(!gradeAuth.has_value())
@@ -463,7 +453,7 @@ try
     db_users << "DELETE FROM USER WHERE NAME = ?;" << usernameOld;
 
     //记录操作日志
-    OperationRecord::insertRecord("成功", "删除用户 " + usernameOld, "用户管理", authUsername);
+    OperationRecord::insertRecord("成功", "删除用户 " + usernameOld, "用户管理", usernameAuth);
 
     Json::Value respondContent;
     respondContent["message"] = "success";

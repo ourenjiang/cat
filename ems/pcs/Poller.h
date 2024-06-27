@@ -84,10 +84,8 @@ private:
     log4cpp::Category& log_;
     boost::asio::io_service io_service_;
     boost::asio::steady_timer timer_;
-    zmq::context_t zmqContext_;
     zmq::socket_t zmqDealer_;
     zmq::socket_t zmqPublisher_;
-    // std::unique_ptr<ZmqPublish> publisher_;
     std::thread loopThread_;
 };
 }//namespace pcs

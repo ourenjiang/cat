@@ -132,7 +132,7 @@ private:
     std::map<string, ProtectParams> protectPrarmsMap_;
     std::map<string, WeekPlanInfo> weekPlanInfoMap_;
     bool autoRun_;
-    std::shared_ptr<ZmqSubscribe> subscriber_;
+    zmq::socket_t subscriber_;
     std::thread loopThread_;
 };
 }//namespace xftg

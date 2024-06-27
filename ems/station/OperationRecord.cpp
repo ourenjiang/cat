@@ -13,16 +13,14 @@ OperationRecord::OperationRecord()
     registerHttpInterfaces();
     createTable();
     insertIntoDefaultRecord();
-
-    requester_ = make_unique<ZmqRequest>("tcp://127.0.0.1:6200");
 }
 
 void OperationRecord::registerHttpInterfaces()
 {
     using namespace std::placeholders;
     auto& serv = utils::getHttpServerSingleton();
-    serv.Get("/operationRecord", httplib::Server::Handler(bind(&OperationRecord::requestCallbackGet, this, _1, _2)));
-    serv.Get("/operationRecordPageInfo", httplib::Server::Handler(bind(&OperationRecord::requestCallbackGetPageInfo, this, _1, _2)));
+    serv.Post("/operationRecord", httplib::Server::Handler(bind(&OperationRecord::requestCallbackGet, this, _1, _2)));
+    serv.Post("/operationRecordPageInfo", httplib::Server::Handler(bind(&OperationRecord::requestCallbackGetPageInfo, this, _1, _2)));
 }
 
 void OperationRecord::requestCallbackGet(const httplib::Request &req, httplib::Response &res)
@@ -113,67 +111,21 @@ catch(const std::exception& e){
 }
 }
 
-vector<byte> OperationRecord::respondCallbackGet(std::shared_ptr<StationInfo> stationInfo, const vector<byte>& msgbody) const
+void OperationRecord::requestCallbackGetPageInfo(const httplib::Request &req, httplib::Response &res)
 {
-    tuple<string, string, string, string, string, string, string> params;
-    const bool unpackResult = msgpackWrapper::unpack(msgbody.data(), msgbody.size(), params);
-
-    auto [ pageSize, pageIndex, status, type, beginTime, endTime, userName ] = params;
-
-    const string projectPath{ "/opt/paceic_ems_server/main" };
-    const string dbPath{ projectPath + "/db" };
-    BOOST_ASSERT(filesystem::is_directory(dbPath));
-
-    const string filename{ dbPath + "/OperationRecord.sqlite" };
-    sqlite::database OperationRecordDb(filename);
-
-    const string patternStatus = status + "%";
-    const string patternType = type + "%";
-    const string patternBeginTimestamp = beginTime.empty() ? "1900-01-01" : beginTime;
-    const string patternEndTimestamp = endTime.empty() ? "2050-01-01" : endTime;
-    const string patternUserName = userName + "%";
-
-    const string patternLimit = pageSize;
-    const string patternOffset = to_string(std::stoi(pageSize) * std::stoi(pageIndex));
-
-    // 查询
-    vector<OperationRecordInfo> records;
-    OperationRecordDb << "SELECT "
-                            "STATUS, CONTENT, "
-                            "TYPE, CREATE_TIME, "
-                            "USERNAME "
-                            "FROM OPERATION_RECORD "
-                            "WHERE STATUS LIKE ? "
-                            "AND TYPE LIKE ? "
-                            "AND CREATE_TIME > ? "
-                            "AND CREATE_TIME < ? "
-                            "AND USERNAME LIKE ? "
-                            "LIMIT ? OFFSET ?"
-                        << patternStatus << patternType
-                        << patternBeginTimestamp << patternEndTimestamp
-                        << patternUserName
-                        << patternLimit << patternOffset
-    >> [&](string selectedStatus, string selectedContent,
-            string selectedType, string selectedCreateTime,
-            string selectedUserName){
-                
-                records.emplace_back(selectedStatus, selectedContent,
-                                selectedType, selectedCreateTime,
-                                selectedUserName);
-            };
-    if(records.empty())
-        throw std::runtime_error("record not exists");
-    auto serializedMsg = msgpackWrapper::pack(records);
-    return { reinterpret_cast<const byte*>(serializedMsg.data()),
-                reinterpret_cast<const byte*>(serializedMsg.data()) + serializedMsg.size() };
-}
-
-vector<byte> OperationRecord::respondCallbackGetPageInfo(std::shared_ptr<StationInfo> stationInfo, const vector<byte>& msgbody) const
+try
 {
-    tuple<string, string, string, string, string, string> reqbody;
-    const bool unpackResult = msgpackWrapper::unpack(msgbody.data(), msgbody.size(), reqbody);
-    auto& [ pageSize, status, type, beginTime, endTime, userName ] = reqbody;
+    if(!req.has_param("pageSize"))
+        throw std::invalid_argument("invalid params");
+    const string pageSize = req.get_param_value("pageSize");
 
+    const string status = req.has_param("status") ? req.get_param_value("status") : "";
+    const string type = req.has_param("type") ? req.get_param_value("type") : "";
+    const string beginTime = req.has_param("beginTime") ? req.get_param_value("beginTime") : "";
+    const string endTime = req.has_param("endTime") ? req.get_param_value("endTime") : "";
+    const string userName = req.has_param("userName") ? req.get_param_value("userName") : "";
+
+    // 数据库操作
     const string projectPath{ "/opt/paceic_ems_server/main" };
     const string dbPath{ projectPath + "/db" };
     BOOST_ASSERT(filesystem::is_directory(dbPath));
@@ -220,60 +172,10 @@ vector<byte> OperationRecord::respondCallbackGetPageInfo(std::shared_ptr<Station
     root["totalCount"] = to_string(recordCounts);
     root["pageNum"] = to_string(pageNum);
     root["pageSize"] = pageSize;
-    return miscellaneous::serializedJsonAsBytes(root);
-}
-
-void OperationRecord::requestCallbackGetPageInfo(const httplib::Request &req, httplib::Response &res)
-{
-try
-{
-    if(!req.has_param("pageSize"))
-        throw std::invalid_argument("invalid params");
-    const string pageSize = req.get_param_value("pageSize");
-
-    const string status = req.has_param("status") ? req.get_param_value("status") : "";
-    const string type = req.has_param("type") ? req.get_param_value("type") : "";
-    const string beginTime = req.has_param("beginTime") ? req.get_param_value("beginTime") : "";
-    const string endTime = req.has_param("endTime") ? req.get_param_value("endTime") : "";
-    const string userName = req.has_param("userName") ? req.get_param_value("userName") : "";
-
-    // 准备请求参数
-    tuple<string, string, string, string, string, string> requestMsg{ pageSize, status, type, beginTime, endTime, userName };
-    auto serializedMsg = msgpackWrapper::pack(requestMsg);
-    // 准备请求消息
-    string publishContent;
-    const string topic = miscellaneous::createFixedSizeString("OperationRecordPageInfoGet");
-    std::copy(topic.data(), topic.data() + topic.size(), std::back_inserter(publishContent));
-    std::copy(serializedMsg.data(), serializedMsg.data() + serializedMsg.size(), std::back_inserter(publishContent));
-    // 发送消息
-    const vector<byte> sendmsg(reinterpret_cast<byte*>(publishContent.data()),
-                                reinterpret_cast<byte*>(publishContent.data()) + publishContent.size());
-    const bool sendResult = requester_->send(sendmsg);
-    if(!sendResult) throw std::runtime_error("zmq send err");
-    // 接收消息
-    const auto recvResult = requester_->recv();
-    if(!recvResult) throw std::runtime_error("zmq recv failed");
-    const auto recvmsg = recvResult.value();
-    
-    // 先解析标准的响应消息
-    pair<bool, vector<byte>> respondMsg;
-    const bool unpackMsgResult = msgpackWrapper::unpack(recvmsg.data(), recvmsg.size(), respondMsg);
-    BOOST_ASSERT(unpackMsgResult);
-    const auto& [returnStatus, returnContent] = respondMsg;
-    if(!returnStatus){
-        // 再解析自定义的响应内容
-        const string errmsg(reinterpret_cast<const char*>(returnContent.data()),
-                                    reinterpret_cast<const char*>(returnContent.data()) + returnContent.size());
-        throw std::runtime_error(errmsg);
-    }
-
-    // 再解析自定义的响应内容
-    const string respondContent(reinterpret_cast<const char*>(returnContent.data()),
-                                reinterpret_cast<const char*>(returnContent.data()) + returnContent.size());
     
     // 成功响应
     Json::Value repJson;
-    repJson["data"] = miscellaneous::unserializedJson(respondContent);
+    repJson["data"] = root;
     repJson["errcode"] = 0;
     repJson["errmsg"] = "success";
     utils::httpRespond(res, repJson);

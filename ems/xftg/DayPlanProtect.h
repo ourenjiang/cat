@@ -16,9 +16,9 @@ public:
     DayPlanProtect();
     static std::optional<map<string, Record>> getAllRecord();
     
-    vector<byte> respondCallbackDelete(std::shared_ptr<StationInfo> stationInfo, const vector<byte>& reqmsg) const;
-    vector<byte> respondCallbackPost(std::shared_ptr<StationInfo> stationInfo, const vector<byte>& reqmsg) const;
-    vector<byte> respondCallbackPut(std::shared_ptr<StationInfo> stationInfo, const vector<byte>& reqmsg) const;
+    void respondCallback(std::shared_ptr<StationInfo> stationInfo, zmq::socket_t& router,
+                        const vector<byte>& identity, const vector<byte>& subtitle, const vector<byte>& body) const;
+    vector<byte> identity();
 private:
     // 数据发布
     void registerHttpInterfaces();
@@ -33,7 +33,11 @@ private:
 
     std::optional<Record> getRecord(const string& name);
 
-    std::unique_ptr<ZmqRequest> requester_;
+    zmq::socket_t dealer_;
+    const string identity_;
+    const string deleteSubtitle_;
+    const string putSubtitle_;
+    const string postSubtitle_;
 };
 
 }//namespace xftg

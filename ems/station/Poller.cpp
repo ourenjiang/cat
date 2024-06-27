@@ -7,46 +7,47 @@ using namespace ems;
 
 Poller::Poller()
 {
+    {
+        auto& router = zmqSockets_.emplace_back(miscellaneous::createZmqSocket(zmq::socket_type::router));
+        router.bind("tcp://127.0.0.1:6200");
+
+        zmq::pollitem_t item{ router, 0, ZMQ_POLLIN, 0 };
+        pollitems_.emplace_back(item);
+
+        using namespace std::placeholders;
+        pollerCallbacks_.emplace_back(std::bind(&Poller::doRespond, this, _1, _2, _3, _4, _5));
+    }
 }
 
-void Poller::addSubscriber(const string& address, const vector<string>& topicList, 
-                        function<void(const string&, const string&)> readCallback)
+void Poller::addSubscriber(const string& address, const vector<string>& topicList, PollerCallback callback)
 {
-    auto& handler = handlers_.emplace_back(
-        make_tuple<>(zmq::socket_t(zmq::socket_t(zmqContext_, zmq::socket_type::sub)),
-        readCallback));
-
-    auto& zmqSubscriber = std::get<0>(handler);
+    auto& subscriber = zmqSockets_.emplace_back(miscellaneous::createZmqSocket(zmq::socket_type::sub));
+    subscriber.connect(address);
     for(const string& item: topicList){
-        // zmqSubscriber.subscribe(item);
-        zmqSubscriber.connect(address);
-        zmqSubscriber.set(zmq::sockopt::subscribe, item);
+        subscriber.set(zmq::sockopt::subscribe, item);
     }
 
-    // zmq::pollitem_t item{ zmqSubscriber.socket(), 0, ZMQ_POLLIN, 0 };
-    zmq::pollitem_t item{ zmqSubscriber, 0, ZMQ_POLLIN, 0 };
+    zmq::pollitem_t item{ subscriber, 0, ZMQ_POLLIN, 0 };
     pollitems_.emplace_back(item);
+
+    pollerCallbacks_.emplace_back(callback);
 }
 
-void Poller::addRespondCallback(const string& key,
-                            function<vector<byte> (std::shared_ptr<StationInfo>, const vector<byte>&)> callback)
+void Poller::addRespondCallback(const vector<byte>& identity, RespondCallback callback)
 {
-    const string topic = miscellaneous::createFixedSizeString(key);
-    const vector<byte> keyBytes(reinterpret_cast<const byte*>(topic.data()),
-                            reinterpret_cast<const byte*>(topic.data()) + topic.size());
-    respondCallbackMap_.emplace(keyBytes, callback);
+    // const string topic = miscellaneous::createFixedSizeString(key);
+    // const vector<byte> keyBytes(reinterpret_cast<const byte*>(topic.data()),
+    //                         reinterpret_cast<const byte*>(topic.data()) + topic.size());
+    // respondCallbackMap_.emplace(keyBytes, callback);
+    BOOST_ASSERT(!identity.empty());
+    BOOST_ASSERT(callback);
+    BOOST_ASSERT(respondCallbacks_.find(identity) == respondCallbacks_.end());
+
+    respondCallbacks_[identity] = callback;
 }
 
 void Poller::doPoll()
 {
-    if(!responser_)
-    {
-        responser_ = make_unique<ZmqRespond>("tcp://127.0.0.1:6200");
-        zmq::pollitem_t item{ responser_->socket(), 0, ZMQ_POLLIN, 0 };
-        pollitems_.emplace_back(item);
-        responserPollIndex_ = pollitems_.size() - 1;
-    }
-
     zmq::poll(pollitems_.data(), pollitems_.size(), std::chrono::seconds(3));
 
     /* handlers_ 与 pollitems_ 的数组长度保持一致；*/
@@ -55,58 +56,43 @@ void Poller::doPoll()
         const bool isReadable = static_cast<bool>(pollitems_[index].revents & ZMQ_POLLIN);
         if(!isReadable) continue;
 
-        // 单独处理数据检查，后续还是得优化这块结构
-        if(index == responserPollIndex_){
-            doRespond();
-            continue;
-        }
+        BOOST_ASSERT(index < zmqSockets_.size());
+        BOOST_ASSERT(zmqSockets_.size() == pollitems_.size());
+        BOOST_ASSERT(zmqSockets_.size() == pollerCallbacks_.size());
 
-        auto& [subscriber, callback] = handlers_[index];
-
-        // string rBuffer;
-        // const bool result = subscriber.recv(rBuffer);
-        // callback(rBuffer);
-        zmq::message_t topic;
+        auto& activeSocket = zmqSockets_[index];
+        zmq::message_t topicOrIdentity;
+        zmq::message_t subtitle;
         zmq::message_t body;
-        (void)subscriber.recv(topic);
-        (void)subscriber.recv(body);
-        const string topicStream(static_cast<char*>(topic.data()), topic.size());
-        const string bodyStream(static_cast<char*>(body.data()), body.size());
-        callback(topicStream, bodyStream);
+        (void)activeSocket.recv(topicOrIdentity);
+        (void)activeSocket.recv(subtitle);
+        (void)activeSocket.recv(body);
+        
+        const string identityString(reinterpret_cast<char*>(topicOrIdentity.data()), 
+                reinterpret_cast<char*>(topicOrIdentity.data()) + topicOrIdentity.size());
+
+        auto& callback = pollerCallbacks_[index];
+
+        const vector<byte> topicOrIdentityStream(reinterpret_cast<byte*>(topicOrIdentity.data()),
+                            reinterpret_cast<byte*>(topicOrIdentity.data()) + topicOrIdentity.size());
+        const vector<byte> subtitleStream(reinterpret_cast<byte*>(subtitle.data()),
+                            reinterpret_cast<byte*>(subtitle.data()) + subtitle.size());
+        const vector<byte> bodyStream(reinterpret_cast<byte*>(body.data()),
+                            reinterpret_cast<byte*>(body.data()) + body.size());
+        callback(stationInfo_, activeSocket, topicOrIdentityStream, subtitleStream, bodyStream);
     }
 }
 
-void Poller::doRespond()
+void Poller::doRespond(std::shared_ptr<StationInfo>& stationInfo, zmq::socket_t& router,
+                        const vector<byte>& identity, const vector<byte>& subtitle, const vector<byte>& body)
 {
-try
-{
-    const auto recvResult = responser_->recv();
-    BOOST_ASSERT(recvResult.has_value());// 上层使用zmq::poll通知，所以这里一定可以接收到消息
-    const auto recvmsg = recvResult.value();
+    const string identityString(reinterpret_cast<const char*>(identity.data()),
+        reinterpret_cast<const char*>(identity.data()) + identity.size());
 
-    // 查找响应回调
-    const vector<byte> topic{recvmsg.begin(), recvmsg.begin() + 64};
-    const auto callbackItr = respondCallbackMap_.find(topic);
-    BOOST_ASSERT(callbackItr != respondCallbackMap_.end());
+    const auto callbackItr = respondCallbacks_.find(identity);
+    BOOST_ASSERT(callbackItr != respondCallbacks_.end());
 
-    // 执行回调, 并获取响应内容
+    // 执行回调
     const auto& respondCallback = callbackItr->second;
-    const vector<byte> msgbody{ recvmsg.begin() + 64 , recvmsg.end()};
-    const vector<byte> respondContent = respondCallback(stationInfo_, msgbody);
-    // 发送响应内容
-    const auto respondMessage = miscellaneous::createRespondMessage(true, respondContent);
-    const bool sendResult = responser_->send(respondMessage);
-    BOOST_ASSERT(sendResult);
-}
-catch(const std::exception& e){
-
-    // 准备响应内容
-    const string errmsg(e.what());
-    const vector<byte> respondContent{ reinterpret_cast<const byte*>(errmsg.data()), 
-                                        reinterpret_cast<const byte*>(errmsg.data()) + errmsg.size() };
-    // 发送响应内容
-    const auto msg = miscellaneous::createRespondMessage(false, respondContent);
-    const bool sendResult = responser_->send(msg);
-    BOOST_ASSERT(sendResult);
-}
+    respondCallback(stationInfo_, router, identity, subtitle, body);
 }

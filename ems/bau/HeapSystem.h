@@ -15,7 +15,9 @@ class HeapSystem
 {
 public:
     HeapSystem();
-    vector<byte> respondCallback(std::shared_ptr<StationInfo> stationInfo, const vector<byte>& reqmsg) const ;
+    void respondCallback(std::shared_ptr<StationInfo> stationInfo, zmq::socket_t& router,
+                        const vector<byte>& identity, const vector<byte>& subtitle, const vector<byte>& body) const ;
+    vector<byte> identity();
 private:
     void registerAllInterfaces();
     void requestCallback(const httplib::Request &req, httplib::Response &res);
@@ -28,8 +30,9 @@ private:
     Json::Value get_warning(const BauStatusSummary&) const;//告警信息
     Json::Value get_peak(const BauStatusSummary&) const;//系统极值
     
+    const string identity_;
     log4cpp::Category& log_;
-    std::unique_ptr<ZmqRequest> requester_;
+    zmq::socket_t dealer_;
 };
 }//namespace bau
 }//namespace ems

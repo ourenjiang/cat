@@ -88,7 +88,6 @@ private:
     int branchIndex_;
     std::string publishAddress_;
     log4cpp::Category& log_;
-    zmq::context_t zmqContext_;
     zmq::socket_t zmqDealer_;
     zmq::socket_t zmqSubscriber_;
     zmq::socket_t zmqPublisher_;

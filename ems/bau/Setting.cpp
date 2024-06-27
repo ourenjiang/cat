@@ -11,10 +11,16 @@ using namespace ems;
 using namespace ems::bau;
 
 Setting::Setting()
-    : zmqDealerBau_(zmqContext_, zmq::socket_type::dealer)
+    : bauDealer_(miscellaneous::createZmqSocket(zmq::socket_type::dealer))
+    , stationDealer_(miscellaneous::createZmqSocket(zmq::socket_type::dealer))
+    , identity_("BauSetting")
+    , powerOffSubtitle_("PowerOff")
+    , quickStartupSubtitle_("Startup")
+    , setBcuRelaySubtitle_("SetBcuRelay")
 {
     registerHttpInterfaces();
-    stationRequester_ = make_unique<ZmqRequest>("tcp://127.0.0.1:6200");
+    stationDealer_.set(zmq::sockopt::routing_id, identity_);
+    stationDealer_.connect("tcp://127.0.0.1:6200");
 
     {
         auto& cfgRoot = YamlcppWrapper::getRoot();
@@ -26,9 +32,14 @@ Setting::Setting()
         BOOST_ASSERT((*resultLoad)["load"].as<bool>());
 
         const string proxyAddress = (*resultLoad)["master"]["address"].as<string>();
-        // bauRequester_ = make_shared<ZmqRequest>(proxyAddress);
-        zmqDealerBau_.connect(proxyAddress);
+        bauDealer_.connect(proxyAddress);
     }
+}
+
+vector<byte> Setting::identity()
+{
+    const auto beginItr = reinterpret_cast<const byte*>(identity_.data());
+    return { beginItr, beginItr + identity_.size() };
 }
 
 void Setting::registerHttpInterfaces()
@@ -37,8 +48,244 @@ void Setting::registerHttpInterfaces()
     auto& serv = utils::getHttpServerSingleton();
     serv.Post("/bau/powerOff", httplib::Server::Handler(bind(&Setting::requestCallbackPowerOff, this, _1, _2)));
     serv.Post("/bau/quickStartup", httplib::Server::Handler(bind(&Setting::requestCallbackQuickStartup, this, _1, _2)));
-    serv.Post("/bau/setBcuRelay", httplib::Server::Handler(bind(&Setting::requestCallbackSetBcuRelay, this, _1, _2)));
+    serv.Put("/bau/setBcuRelay", httplib::Server::Handler(bind(&Setting::requestCallbackSetBcuRelay, this, _1, _2)));
 }
+
+void Setting::respondCallback(std::shared_ptr<StationInfo> stationInfo, zmq::socket_t& router,
+                        const vector<byte>& identity, const vector<byte>& subtitle, const vector<byte>& body)
+{
+try
+{
+    const string subtitleString(reinterpret_cast<const char*>(subtitle.data()),
+        reinterpret_cast<const char*>(subtitle.data()) + subtitle.size());
+    BOOST_ASSERT(subtitleString == powerOffSubtitle_
+                    || subtitleString == quickStartupSubtitle_ || subtitleString == setBcuRelaySubtitle_);
+    if(subtitleString == powerOffSubtitle_){
+        string requestMsg;
+        msgpackWrapper::unpack(body.data(), body.size(), requestMsg);
+        const int branchIndex = std::stoi(requestMsg);
+        auto& branchList = stationInfo->branchList;
+        auto branchItr = branchList.find(branchIndex);
+        if(branchItr == branchList.end())
+            throw std::runtime_error("branch not exist");
+    }
+    
+
+
+    {
+        const pair<bool, vector<byte>> repbody{ true, {} };
+        const msgpack::sbuffer repbodySerialized = msgpackWrapper::pack(repbody);
+
+        zmq::message_t identitymsg(identity.data(), identity.size());
+        zmq::message_t repmsg(repbodySerialized.data(), repbodySerialized.size());
+        router.send(identitymsg, zmq::send_flags::sndmore);
+        router.send(repmsg, zmq::send_flags::none);
+    }
+}
+catch(const std::exception& e){
+    const vector<byte> repcontent = miscellaneous::convertStringToBytes(e.what());
+    const pair<bool, vector<byte>> repbody{ false, repcontent };
+    const msgpack::sbuffer repbodySerialized = msgpackWrapper::pack(repbody);
+
+    zmq::message_t identitymsg(identity.data(), identity.size());
+    zmq::message_t repmsg(repbodySerialized.data(), repbodySerialized.size());
+    router.send(identitymsg, zmq::send_flags::sndmore);
+    router.send(repmsg, zmq::send_flags::none);
+}
+}
+
+void Setting::respondCallbacPowerOff(std::shared_ptr<StationInfo> stationInfo, zmq::socket_t& router, const vector<byte>& identity, const vector<byte>& body)
+{
+try
+{
+    string requestMsg;
+    const bool unpackResult = msgpackWrapper::unpack(body.data(), body.size(), requestMsg);
+    const string branchIndex = requestMsg;
+
+    // 先检查分支、簇的状态
+    auto& branchList = stationInfo->branchList;
+    auto branchItr = branchList.find(std::stoi(branchIndex));
+    if(branchItr == branchList.end()) throw std::runtime_error("branch not exist");
+
+    // 准备Modbus请求帧:
+    // 0xd700  掉电关机   固定0
+    // 0xd701  一键并机   固定0
+    // 0xd702  簇分离     簇下标从1开始，0代表所有
+    // 0xd703  簇合并     簇下标从1开始，0代表所有
+    uint16_t regAddress{ 0xd700 };
+    uint16_t regData{ 0 };
+    auto reqmsg = miscellaneous::createModbusRtuWriteFrame(0x01, 0x06, regAddress, regData);
+
+    zmq::message_t sndmsg(reqmsg.data(), reqmsg.size());
+    bauDealer_.send(sndmsg, zmq::send_flags::none);
+
+    zmq::pollitem_t item{ bauDealer_, 0, ZMQ_POLLIN, 0 };
+    const int pollResult = zmq::poll(&item, 1, std::chrono::seconds(1));
+    BOOST_ASSERT(pollResult == 0 || pollResult == 1);
+    if(pollResult == 0)
+        throw std::runtime_error("zmq recv failed");
+
+    zmq::message_t rcvmsg;
+    (void)bauDealer_.recv(rcvmsg);
+    const vector<uint8_t> repmsg(reinterpret_cast<uint8_t*>(rcvmsg.data()),
+                            reinterpret_cast<uint8_t*>(rcvmsg.data()) + rcvmsg.size());
+    if(reqmsg != repmsg)
+        throw std::runtime_error("recv frame err");
+
+    // 返回结果
+    {
+        const vector<byte> repcontent = miscellaneous::convertStringToBytes("success");
+        const pair<bool, vector<byte>> repbody{ true, repcontent };
+        const msgpack::sbuffer repbodySerialized = msgpackWrapper::pack(repbody);
+
+        zmq::message_t identitymsg(identity.data(), identity.size());
+        zmq::message_t repmsg(repbodySerialized.data(), repbodySerialized.size());
+        router.send(identitymsg, zmq::send_flags::sndmore);
+        router.send(repmsg, zmq::send_flags::none);
+    }
+}
+catch(const std::exception& e){
+    const vector<byte> repcontent = miscellaneous::convertStringToBytes(e.what());
+    const pair<bool, vector<byte>> repbody{ false, repcontent };
+    const msgpack::sbuffer repbodySerialized = msgpackWrapper::pack(repbody);
+
+    zmq::message_t identitymsg(identity.data(), identity.size());
+    zmq::message_t repmsg(repbodySerialized.data(), repbodySerialized.size());
+    router.send(identitymsg, zmq::send_flags::sndmore);
+    router.send(repmsg, zmq::send_flags::none);
+}
+}
+
+void Setting::respondCallbacQuickStartup(std::shared_ptr<StationInfo> stationInfo, zmq::socket_t& router, const vector<byte>& identity, const vector<byte>& body)
+{
+try
+{
+    string requestMsg;
+    const bool unpackResult = msgpackWrapper::unpack(body.data(), body.size(), requestMsg);
+    const string branchIndex = requestMsg;
+    
+    // 先检查分支、簇的状态
+    auto& branchList = stationInfo->branchList;
+    auto branchItr = branchList.find(std::stoi(branchIndex));
+    if(branchItr == branchList.end()) throw std::runtime_error("branch not exist");
+
+    // 准备Modbus请求帧:
+    // 0xd700  掉电关机   固定0
+    // 0xd701  一键并机   固定0
+    // 0xd702  簇分离     簇下标从1开始，0代表所有
+    // 0xd703  簇合并     簇下标从1开始，0代表所有
+    uint16_t regAddress{ 0xd701 };
+    uint16_t regData{ 0 };
+    auto reqmsg = miscellaneous::createModbusRtuWriteFrame(0x01, 0x06, regAddress, regData);
+
+    zmq::message_t sndmsg(reqmsg.data(), reqmsg.size());
+    bauDealer_.send(sndmsg, zmq::send_flags::none);
+
+    zmq::pollitem_t item{ bauDealer_, 0, ZMQ_POLLIN, 0 };
+    const int pollResult = zmq::poll(&item, 1, std::chrono::seconds(1));
+    BOOST_ASSERT(pollResult == 0 || pollResult == 1);
+    if(pollResult == 0)
+        throw std::runtime_error("zmq recv failed");
+
+    zmq::message_t rcvmsg;
+    (void)bauDealer_.recv(rcvmsg);
+    const vector<uint8_t> repmsg(reinterpret_cast<uint8_t*>(rcvmsg.data()),
+                            reinterpret_cast<uint8_t*>(rcvmsg.data()) + rcvmsg.size());
+    if(reqmsg != repmsg)
+        throw std::runtime_error("recv frame err");
+
+    // 返回结果
+    {
+        const vector<byte> repcontent = miscellaneous::convertStringToBytes("success");
+        const pair<bool, vector<byte>> repbody{ true, repcontent };
+        const msgpack::sbuffer repbodySerialized = msgpackWrapper::pack(repbody);
+
+        zmq::message_t identitymsg(identity.data(), identity.size());
+        zmq::message_t repmsg(repbodySerialized.data(), repbodySerialized.size());
+        router.send(identitymsg, zmq::send_flags::sndmore);
+        router.send(repmsg, zmq::send_flags::none);
+    }
+}
+catch(const std::exception& e){
+    const vector<byte> repcontent = miscellaneous::convertStringToBytes(e.what());
+    const pair<bool, vector<byte>> repbody{ false, repcontent };
+    const msgpack::sbuffer repbodySerialized = msgpackWrapper::pack(repbody);
+
+    zmq::message_t identitymsg(identity.data(), identity.size());
+    zmq::message_t repmsg(repbodySerialized.data(), repbodySerialized.size());
+    router.send(identitymsg, zmq::send_flags::sndmore);
+    router.send(repmsg, zmq::send_flags::none);
+}
+}
+
+void Setting::respondCallbacSetBcuRelay(std::shared_ptr<StationInfo> stationInfo, zmq::socket_t& router,
+                                        const vector<byte>& identity, const vector<byte>& body)
+{
+try
+{
+    tuple<string, string, string> requestMsg;
+    const bool unpackResult = msgpackWrapper::unpack(body.data(), body.size(), requestMsg);
+    auto& [branchIndex, bcuIndex, status] = requestMsg;
+
+    // 先检查分支、簇的状态
+    auto& branchList = stationInfo->branchList;
+    auto branchItr = branchList.find(std::stoi(branchIndex));
+    if(branchItr == branchList.end()) throw std::runtime_error("branch not exist");
+    auto& branchInfo = branchItr->second;
+    auto& bauInfo = branchInfo->bauInfo;
+    auto& bcuList = bauInfo.bcuList;
+    auto bcuItr = bcuList.find(std::stoi(bcuIndex));
+    if(bcuItr == bcuList.end()) throw std::runtime_error("bcu not exist");
+
+    // 准备Modbus请求帧:
+    // 0xd701  一键并机   固定0
+    // 0xd702  簇分离     簇下标从1开始，0代表所有
+    // 0xd703  簇合并     簇下标从1开始，0代表所有
+    uint16_t regAddress{ 0 };
+    if(status == "on") regAddress = 0xd703;
+    if(status == "off") regAddress = 0xd702;
+    uint16_t regData{ 0 };
+    auto reqmsg = miscellaneous::createModbusRtuWriteFrame(0x01, 0x06, regAddress, regData);
+
+    zmq::message_t sndmsg(reqmsg.data(), reqmsg.size());
+    bauDealer_.send(sndmsg, zmq::send_flags::none);
+
+    zmq::pollitem_t item{ bauDealer_, 0, ZMQ_POLLIN, 0 };
+    const int pollResult = zmq::poll(&item, 1, std::chrono::seconds(1));
+    BOOST_ASSERT(pollResult == 0 || pollResult == 1);
+    if(pollResult == 0)
+        throw std::runtime_error("zmq recv failed");
+
+    zmq::message_t rcvmsg;
+    (void)bauDealer_.recv(rcvmsg);
+    const vector<uint8_t> repmsg(reinterpret_cast<uint8_t*>(rcvmsg.data()),
+                            reinterpret_cast<uint8_t*>(rcvmsg.data()) + rcvmsg.size());
+    if(reqmsg != repmsg)
+        throw std::runtime_error("recv frame err");
+
+    {
+        const vector<byte> repcontent = miscellaneous::convertStringToBytes("success");
+        const pair<bool, vector<byte>> repbody{ true, repcontent };
+        const msgpack::sbuffer repbodySerialized = msgpackWrapper::pack(repbody);
+
+        zmq::message_t identitymsg(identity.data(), identity.size());
+        zmq::message_t repmsg(repbodySerialized.data(), repbodySerialized.size());
+        router.send(identitymsg, zmq::send_flags::sndmore);
+        router.send(repmsg, zmq::send_flags::none);
+    }
+}
+catch(const std::exception& e){
+    const vector<byte> repcontent = miscellaneous::convertStringToBytes(e.what());
+    const pair<bool, vector<byte>> repbody{ false, repcontent };
+    const msgpack::sbuffer repbodySerialized = msgpackWrapper::pack(repbody);
+
+    zmq::message_t identitymsg(identity.data(), identity.size());
+    zmq::message_t repmsg(repbodySerialized.data(), repbodySerialized.size());
+    router.send(identitymsg, zmq::send_flags::sndmore);
+    router.send(repmsg, zmq::send_flags::none);
+}
+}
+
 
 void Setting::requestCallbackPowerOff(const httplib::Request &req, httplib::Response &res)
 {
@@ -64,26 +311,16 @@ try
     string workParams{ reqbody["branchIndex"].asString() };
     auto serializedMsg = msgpackWrapper::pack(workParams);
     
-    // 准备请求消息
-    string publishContent;
-    const string topic = miscellaneous::createFixedSizeString("BauSettingPowerOff");
-    std::copy(topic.data(), topic.data() + topic.size(), std::back_inserter(publishContent));
-    std::copy(serializedMsg.data(), serializedMsg.data() + serializedMsg.size(), std::back_inserter(publishContent));
-
-    // 发送消息
-    const vector<byte> sendmsg(reinterpret_cast<byte*>(publishContent.data()),
-                                reinterpret_cast<byte*>(publishContent.data()) + publishContent.size());
-    const bool sendResult = stationRequester_->send(sendmsg);
-    if(!sendResult) throw std::runtime_error("zmq send err");
-
+    zmq::message_t sndmsg(serializedMsg.data(), serializedMsg.size());
+    stationDealer_.send(zmq::message_t(powerOffSubtitle_), zmq::send_flags::sndmore);//empty
+    stationDealer_.send(sndmsg, zmq::send_flags::none);
     // 接收消息
-    const auto recvResult = stationRequester_->recv();
-    if(!recvResult) throw std::runtime_error("zmq recv failed");
-    const auto recvmsg = recvResult.value();
+    zmq::message_t rcvmsg;
+    (void)stationDealer_.recv(rcvmsg);
 
     // 先解析标准的响应消息
     pair<bool, vector<byte>> respondMsg;
-    const bool unpackMsgResult = msgpackWrapper::unpack(recvmsg.data(), recvmsg.size(), respondMsg);
+    const bool unpackMsgResult = msgpackWrapper::unpack(rcvmsg.data(), rcvmsg.size(), respondMsg);
     BOOST_ASSERT(unpackMsgResult);
     const auto& [returnStatus, returnContent] = respondMsg;
     if(!returnStatus){
@@ -138,26 +375,16 @@ try
     string workParams{ reqbody["branchIndex"].asString() };
     auto serializedMsg = msgpackWrapper::pack(workParams);
     
-    // 准备请求消息
-    string publishContent;
-    const string topic = miscellaneous::createFixedSizeString("BauSettingQuickStartup");
-    std::copy(topic.data(), topic.data() + topic.size(), std::back_inserter(publishContent));
-    std::copy(serializedMsg.data(), serializedMsg.data() + serializedMsg.size(), std::back_inserter(publishContent));
-
-    // 发送消息
-    const vector<byte> sendmsg(reinterpret_cast<byte*>(publishContent.data()),
-                                reinterpret_cast<byte*>(publishContent.data()) + publishContent.size());
-    const bool sendResult = stationRequester_->send(sendmsg);
-    if(!sendResult) throw std::runtime_error("zmq send err");
-
+    zmq::message_t sndmsg(serializedMsg.data(), serializedMsg.size());
+    stationDealer_.send(zmq::message_t(quickStartupSubtitle_), zmq::send_flags::sndmore);//empty
+    stationDealer_.send(sndmsg, zmq::send_flags::none);
     // 接收消息
-    const auto recvResult = stationRequester_->recv();
-    if(!recvResult) throw std::runtime_error("zmq recv failed");
-    const auto recvmsg = recvResult.value();
+    zmq::message_t rcvmsg;
+    (void)stationDealer_.recv(rcvmsg);
 
     // 先解析标准的响应消息
     pair<bool, vector<byte>> respondMsg;
-    const bool unpackMsgResult = msgpackWrapper::unpack(recvmsg.data(), recvmsg.size(), respondMsg);
+    const bool unpackMsgResult = msgpackWrapper::unpack(rcvmsg.data(), rcvmsg.size(), respondMsg);
     BOOST_ASSERT(unpackMsgResult);
     const auto& [returnStatus, returnContent] = respondMsg;
     if(!returnStatus){
@@ -225,25 +452,16 @@ try
     auto serializedMsg = msgpackWrapper::pack(workParams);
 
     // 准备请求消息
-    string publishContent;
-    const string topic = miscellaneous::createFixedSizeString("BauSettingSetBcuRelay");
-    std::copy(topic.data(), topic.data() + topic.size(), std::back_inserter(publishContent));
-    std::copy(serializedMsg.data(), serializedMsg.data() + serializedMsg.size(), std::back_inserter(publishContent));
-
-    // 发送消息
-    const vector<byte> sendmsg(reinterpret_cast<byte*>(publishContent.data()),
-                                reinterpret_cast<byte*>(publishContent.data()) + publishContent.size());
-    const bool sendResult = stationRequester_->send(sendmsg);
-    if(!sendResult) throw std::runtime_error("zmq send err");
-
+    zmq::message_t sndmsg(serializedMsg.data(), serializedMsg.size());
+    stationDealer_.send(zmq::message_t(setBcuRelaySubtitle_), zmq::send_flags::sndmore);//empty
+    stationDealer_.send(sndmsg, zmq::send_flags::none);
     // 接收消息
-    const auto recvResult = stationRequester_->recv();
-    if(!recvResult) throw std::runtime_error("zmq recv failed");
-    const auto recvmsg = recvResult.value();
+    zmq::message_t rcvmsg;
+    (void)stationDealer_.recv(rcvmsg);
 
     // 先解析标准的响应消息
     pair<bool, vector<byte>> respondMsg;
-    const bool unpackMsgResult = msgpackWrapper::unpack(recvmsg.data(), recvmsg.size(), respondMsg);
+    const bool unpackMsgResult = msgpackWrapper::unpack(rcvmsg.data(), rcvmsg.size(), respondMsg);
     BOOST_ASSERT(unpackMsgResult);
     const auto& [returnStatus, returnContent] = respondMsg;
     if(!returnStatus){
@@ -280,136 +498,4 @@ catch(const std::exception& e){
     respondmsg["errmsg"] = e.what();
     utils::httpRespond(res, respondmsg);
 }
-}
-
-vector<byte> Setting::respondCallbacPowerOff(std::shared_ptr<StationInfo> stationInfo, const vector<byte>& msgbody)
-{
-    string requestMsg;
-    const bool unpackResult = msgpackWrapper::unpack(msgbody.data(), msgbody.size(), requestMsg);
-    const string branchIndex = requestMsg;
-
-    // 先检查分支、簇的状态
-    auto& branchList = stationInfo->branchList;
-    auto branchItr = branchList.find(std::stoi(branchIndex));
-    if(branchItr == branchList.end()) throw std::runtime_error("branch not exist");
-
-    // 准备Modbus请求帧:
-    // 0xd700  掉电关机   固定0
-    // 0xd701  一键并机   固定0
-    // 0xd702  簇分离     簇下标从1开始，0代表所有
-    // 0xd703  簇合并     簇下标从1开始，0代表所有
-    uint16_t regAddress{ 0xd700 };
-    uint16_t regData{ 0 };
-    auto reqmsg = miscellaneous::createModbusRtuWriteFrame(0x01, 0x06, regAddress, regData);
-
-    zmq::message_t sndmsg(reqmsg.data(), reqmsg.size());
-    zmqDealerBau_.send(sndmsg, zmq::send_flags::none);
-
-    zmq::pollitem_t item{ zmqDealerBau_, 0, ZMQ_POLLIN, 0 };
-    const int pollResult = zmq::poll(&item, 1, std::chrono::seconds(1));
-    BOOST_ASSERT(pollResult == 0 || pollResult == 1);
-    if(pollResult == 0)
-        throw std::runtime_error("zmq recv failed");
-
-    zmq::message_t rcvmsg;
-    (void)zmqDealerBau_.recv(rcvmsg);
-    const vector<uint8_t> repmsg(reinterpret_cast<uint8_t*>(rcvmsg.data()),
-                            reinterpret_cast<uint8_t*>(rcvmsg.data()) + rcvmsg.size());
-    if(reqmsg != repmsg)
-        throw std::runtime_error("recv frame err");
-
-    // 返回结果
-    const string result{ "success" };
-    return { reinterpret_cast<const byte*>(result.data()),
-            reinterpret_cast<const byte*>(result.data()) + result.size() };
-}
-
-vector<byte> Setting::respondCallbacQuickStartup(std::shared_ptr<StationInfo> stationInfo, const vector<byte>& msgbody)
-{
-    string requestMsg;
-    const bool unpackResult = msgpackWrapper::unpack(msgbody.data(), msgbody.size(), requestMsg);
-    const string branchIndex = requestMsg;
-    
-    // 先检查分支、簇的状态
-    auto& branchList = stationInfo->branchList;
-    auto branchItr = branchList.find(std::stoi(branchIndex));
-    if(branchItr == branchList.end()) throw std::runtime_error("branch not exist");
-
-    // 准备Modbus请求帧:
-    // 0xd700  掉电关机   固定0
-    // 0xd701  一键并机   固定0
-    // 0xd702  簇分离     簇下标从1开始，0代表所有
-    // 0xd703  簇合并     簇下标从1开始，0代表所有
-    uint16_t regAddress{ 0xd701 };
-    uint16_t regData{ 0 };
-    auto reqmsg = miscellaneous::createModbusRtuWriteFrame(0x01, 0x06, regAddress, regData);
-
-    zmq::message_t sndmsg(reqmsg.data(), reqmsg.size());
-    zmqDealerBau_.send(sndmsg, zmq::send_flags::none);
-
-    zmq::pollitem_t item{ zmqDealerBau_, 0, ZMQ_POLLIN, 0 };
-    const int pollResult = zmq::poll(&item, 1, std::chrono::seconds(1));
-    BOOST_ASSERT(pollResult == 0 || pollResult == 1);
-    if(pollResult == 0)
-        throw std::runtime_error("zmq recv failed");
-
-    zmq::message_t rcvmsg;
-    (void)zmqDealerBau_.recv(rcvmsg);
-    const vector<uint8_t> repmsg(reinterpret_cast<uint8_t*>(rcvmsg.data()),
-                            reinterpret_cast<uint8_t*>(rcvmsg.data()) + rcvmsg.size());
-    if(reqmsg != repmsg)
-        throw std::runtime_error("recv frame err");
-
-    // 返回结果
-    const string result{ "success" };
-    return { reinterpret_cast<const byte*>(result.data()),
-            reinterpret_cast<const byte*>(result.data()) + result.size() };
-}
-
-vector<byte> Setting::respondCallbacSetBcuRelay(std::shared_ptr<StationInfo> stationInfo, const vector<byte>& msgbody)
-{
-    tuple<string, string, string> requestMsg;
-    const bool unpackResult = msgpackWrapper::unpack(msgbody.data(), msgbody.size(), requestMsg);
-    auto& [branchIndex, bcuIndex, status] = requestMsg;
-
-    // 先检查分支、簇的状态
-    auto& branchList = stationInfo->branchList;
-    auto branchItr = branchList.find(std::stoi(branchIndex));
-    if(branchItr == branchList.end()) throw std::runtime_error("branch not exist");
-    auto& branchInfo = branchItr->second;
-    auto& bauInfo = branchInfo->bauInfo;
-    auto& bcuList = bauInfo.bcuList;
-    auto bcuItr = bcuList.find(std::stoi(bcuIndex));
-    if(bcuItr == bcuList.end()) throw std::runtime_error("bcu not exist");
-
-    // 准备Modbus请求帧:
-    // 0xd701  一键并机   固定0
-    // 0xd702  簇分离     簇下标从1开始，0代表所有
-    // 0xd703  簇合并     簇下标从1开始，0代表所有
-    uint16_t regAddress{ 0 };
-    if(status == "on") regAddress = 0xd703;
-    if(status == "off") regAddress = 0xd702;
-    uint16_t regData{ 0 };
-    auto reqmsg = miscellaneous::createModbusRtuWriteFrame(0x01, 0x06, regAddress, regData);
-
-    zmq::message_t sndmsg(reqmsg.data(), reqmsg.size());
-    zmqDealerBau_.send(sndmsg, zmq::send_flags::none);
-
-    zmq::pollitem_t item{ zmqDealerBau_, 0, ZMQ_POLLIN, 0 };
-    const int pollResult = zmq::poll(&item, 1, std::chrono::seconds(1));
-    BOOST_ASSERT(pollResult == 0 || pollResult == 1);
-    if(pollResult == 0)
-        throw std::runtime_error("zmq recv failed");
-
-    zmq::message_t rcvmsg;
-    (void)zmqDealerBau_.recv(rcvmsg);
-    const vector<uint8_t> repmsg(reinterpret_cast<uint8_t*>(rcvmsg.data()),
-                            reinterpret_cast<uint8_t*>(rcvmsg.data()) + rcvmsg.size());
-    if(reqmsg != repmsg)
-        throw std::runtime_error("recv frame err");
-
-    // 返回结果
-    const string result{ "success" };
-    return { reinterpret_cast<const byte*>(result.data()),
-            reinterpret_cast<const byte*>(result.data()) + result.size() };
 }

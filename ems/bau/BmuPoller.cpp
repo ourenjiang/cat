@@ -17,9 +17,9 @@ BmuPoller::BmuPoller()
     , pollerCurrentBcuIndex_(0)
     , pollerCurrentBmuIndex_(0)
     , branchIndex_(0)// 应该从配置文件加载
-    , zmqDealer_(zmqContext_, zmq::socket_type::dealer)
-    , zmqSubscriber_(zmqContext_, zmq::socket_type::sub)
-    , zmqPublisher_(zmqContext_, zmq::socket_type::pub)
+    , zmqSubscriber_(miscellaneous::createZmqSocket(zmq::socket_type::sub))
+    , zmqDealer_(miscellaneous::createZmqSocket(zmq::socket_type::dealer))
+    , zmqPublisher_(miscellaneous::createZmqSocket(zmq::socket_type::pub))
 {
     auto& cfgRoot = YamlcppWrapper::getRoot();
     const auto& collectors = cfgRoot["collector"];
@@ -49,8 +49,10 @@ void BmuPoller::start()
     while(true){
         {
             zmq::message_t topic;
+            zmq::message_t subtitle;
             zmq::message_t body;
             (void)zmqSubscriber_.recv(topic);
+            (void)zmqSubscriber_.recv(subtitle);
             (void)zmqSubscriber_.recv(body);
             const string bodyStream(static_cast<char*>(body.data()), body.size());
 
@@ -89,18 +91,13 @@ void BmuPoller::start()
         // 联合发布
         const string topic{ "BmuStatus" };// 主题名称
 
-        // string publishContent;
-        // std::copy(topic.data(), topic.data() + topic.size(), std::back_inserter(publishContent));
-
         tuple<int, int, int> location{ branchIndex_, pollerCurrentBcuIndex_, pollerCurrentBmuIndex_ };
         auto body = tuple_cat(location, tie(cellvoltSummary.value()), tie(celltemSummary.value()));
         auto serializedBody = msgpackWrapper::pack(body);
-        // std::copy(serializedBody.data(), serializedBody.data() + serializedBody.size(), std::back_inserter(publishContent));
         zmq::message_t msgbody(serializedBody.data(), serializedBody.size());
         zmqPublisher_.send(zmq::message_t(topic), zmq::send_flags::sndmore);
+        zmqPublisher_.send(zmq::message_t(), zmq::send_flags::sndmore);//subtitle
         zmqPublisher_.send(msgbody, zmq::send_flags::none);
-        // if(!bmuCelltemPublisher_->send(publishContent.data(), publishContent.size()))
-        //     log_.errorStream() << topic << " publish failed";
         
         pollerCurrentBmuIndex_++;// 注意递增
     }});
@@ -108,8 +105,6 @@ void BmuPoller::start()
 
 void BmuPoller::subscribeBauStatus(const std::string& addr, const std::string& topic)
 {
-    // bauFrameSubscriber_ = make_shared<ZmqSubscribe>(addr);
-    // bauFrameSubscriber_->subscribe(topic);
     zmqSubscriber_.connect(addr);
     zmqSubscriber_.set(zmq::sockopt::subscribe, topic);
 }
@@ -117,7 +112,6 @@ void BmuPoller::subscribeBauStatus(const std::string& addr, const std::string& t
 void BmuPoller::initPublishInterface(const std::string& addr)
 {
     // 初始化发布接口
-    // bmuCelltemPublisher_ = make_shared<ZmqPublish>(addr);
     zmqPublisher_.bind(addr);
 }
 

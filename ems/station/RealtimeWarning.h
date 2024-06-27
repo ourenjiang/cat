@@ -8,21 +8,19 @@ namespace ems
 {
 using namespace std;
 
-class DeviceTreeList
+class RealtimeWarning
 {
 public:
-    DeviceTreeList();
-
-    void respondCallback(std::shared_ptr<StationInfo> stationInfo, zmq::socket_t& router,
+    RealtimeWarning();
+    void respondCallbackGetWarningDeviceTree(std::shared_ptr<StationInfo> stationInfo, zmq::socket_t& router,
                         const vector<byte>& identity, const vector<byte>& subtitle, const vector<byte>& body);
     vector<byte> identity();
 private:
-    // 数据发布
-    void registerHttpInterfaces();
-    void requestCallback(const httplib::Request &req, httplib::Response &res);
+    void registerHttpInterfaces(); // 数据发布
+    void requestCallbackGetWarningDeviceTree(const httplib::Request &req, httplib::Response &res);
 
-    zmq::socket_t dealer_;
     const string identity_;
+    zmq::socket_t dealer_;
 };
 
 }//namespace ems

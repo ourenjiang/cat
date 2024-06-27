@@ -9,9 +9,18 @@ using namespace ems::bau;
 
 HeapSystem::HeapSystem()
     : log_(ems::Log4cppWrapper::getLogger(5))
+    , identity_("HeapSystemGet")
+    , dealer_(miscellaneous::createZmqSocket(zmq::socket_type::dealer))
 {
     registerAllInterfaces();
-    requester_ = make_unique<ZmqRequest>("tcp://127.0.0.1:6200");
+    dealer_.set(zmq::sockopt::routing_id, identity_);
+    dealer_.connect("tcp://127.0.0.1:6200");
+}
+
+vector<byte> HeapSystem::identity()
+{
+    const auto beginItr = reinterpret_cast<const byte*>(identity_.data());
+    return { beginItr, beginItr + identity_.size() };
 }
 
 void HeapSystem::registerAllInterfaces()
@@ -25,33 +34,22 @@ void HeapSystem::requestCallback(const httplib::Request &req, httplib::Response 
 {
 try
 {
-    if(!req.has_param("index"))
+    if(!req.has_param("branchIndex"))
         throw std::runtime_error("request params err");
     
-    const string workParams{ req.get_param_value("index") };
-
     // 准备请求参数
+    const string workParams = req.get_param_value("branchIndex");
     auto serializedMsg = msgpackWrapper::pack(workParams);
-    // 准备请求消息
-    string publishContent;
-    const string topic = miscellaneous::createFixedSizeString("HeapSystemGet");
-    std::copy(topic.data(), topic.data() + topic.size(), std::back_inserter(publishContent));
-    std::copy(serializedMsg.data(), serializedMsg.data() + serializedMsg.size(), std::back_inserter(publishContent));
-
-    // 发送消息
-    const vector<byte> sendmsg(reinterpret_cast<byte*>(publishContent.data()),
-                                reinterpret_cast<byte*>(publishContent.data()) + publishContent.size());
-    const bool sendResult = requester_->send(sendmsg);
-    if(!sendResult) throw std::runtime_error("zmq send err");
-
+    zmq::message_t sndmsg(serializedMsg.data(), serializedMsg.size());
+    dealer_.send(zmq::message_t(), zmq::send_flags::sndmore);
+    dealer_.send(sndmsg, zmq::send_flags::none);
     // 接收消息
-    const auto recvResult = requester_->recv();
-    if(!recvResult) throw std::runtime_error("zmq recv failed");
-    const auto recvmsg = recvResult.value();
+    zmq::message_t rcvmsg;
+    (void)dealer_.recv(rcvmsg);
 
     // 先解析标准的响应消息
     pair<bool, vector<byte>> respondMsg;
-    const bool unpackMsgResult = msgpackWrapper::unpack(recvmsg.data(), recvmsg.size(), respondMsg);
+    const bool unpackMsgResult = msgpackWrapper::unpack(rcvmsg.data(), rcvmsg.size(), respondMsg);
     BOOST_ASSERT(unpackMsgResult);
     const auto& [returnStatus, returnContent] = respondMsg;
     if(!returnStatus){
@@ -62,12 +60,12 @@ try
     }
 
     // 再解析自定义的响应内容
-    const string respondContent(reinterpret_cast<const char*>(returnContent.data()),
+    const string jsonString(reinterpret_cast<const char*>(returnContent.data()),
                                 reinterpret_cast<const char*>(returnContent.data()) + returnContent.size());
 
     // 成功响应
     Json::Value repJson;
-    repJson["data"] = miscellaneous::unserializedJson(respondContent);
+    repJson["data"] = miscellaneous::unserializedJson(jsonString);
     repJson["errcode"] = 0;
     repJson["errmsg"] = "success";
     utils::httpRespond(res, repJson);
@@ -162,10 +160,13 @@ string HeapSystem::convertCellAddrFormat(const uint16_t cellGlobalIndex)  const
            + '/' + to_string(cellIndex + 1);
 }
 
-vector<byte> HeapSystem::respondCallback(std::shared_ptr<StationInfo> stationInfo, const vector<byte>& msgbody) const
+void HeapSystem::respondCallback(std::shared_ptr<StationInfo> stationInfo, zmq::socket_t& router,
+                        const vector<byte>& identity, const vector<byte>& subtitle, const vector<byte>& body) const
+{
+try
 {
     string reqbody;
-    const bool unpackResult = msgpackWrapper::unpack(msgbody.data(), msgbody.size(), reqbody);
+    const bool unpackResult = msgpackWrapper::unpack(body.data(), body.size(), reqbody);
     const string branchIndex = reqbody;
 
     auto& branchList = stationInfo->branchList;
@@ -182,7 +183,28 @@ vector<byte> HeapSystem::respondCallback(std::shared_ptr<StationInfo> stationInf
     root["branch"] = get_bcu(bauInfo.bcuList);
     root["warning"] = get_warning(bauInfo.bauStatusSummary);
     root["peak"] = get_peak(bauInfo.bauStatusSummary);
-    return miscellaneous::serializedJsonAsBytes(root);
+
+    {
+        const vector<byte> repcontent = miscellaneous::serializedJsonAsBytes(root);
+        const pair<bool, vector<byte>> repbody{ true, repcontent };
+        const msgpack::sbuffer repbodySerialized = msgpackWrapper::pack(repbody);
+
+        zmq::message_t identitymsg(identity.data(), identity.size());
+        zmq::message_t repmsg(repbodySerialized.data(), repbodySerialized.size());
+        router.send(identitymsg, zmq::send_flags::sndmore);
+        router.send(repmsg, zmq::send_flags::none);
+    }
+}
+catch(const std::exception& e){
+    const vector<byte> repcontent = miscellaneous::convertStringToBytes(e.what());
+    const pair<bool, vector<byte>> repbody{ false, repcontent };
+    const msgpack::sbuffer repbodySerialized = msgpackWrapper::pack(repbody);
+
+    zmq::message_t identitymsg(identity.data(), identity.size());
+    zmq::message_t repmsg(repbodySerialized.data(), repbodySerialized.size());
+    router.send(identitymsg, zmq::send_flags::sndmore);
+    router.send(repmsg, zmq::send_flags::none);
+}
 }
 
 Json::Value HeapSystem::get_peak(const BauStatusSummary& bauStatusSummary) const

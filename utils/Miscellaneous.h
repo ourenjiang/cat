@@ -7,6 +7,7 @@
 #include <chrono>
 #include "json/json.h"
 #include <optional>
+#include "zmq.hpp"
 
 namespace ems
 {
@@ -56,6 +57,7 @@ vector<byte> createRespondMessage(const bool status, const vector<byte>& content
 vector<byte> serializedJsonAsBytes(const Json::Value& data);
 // 字符串类型转换为字节流类型
 vector<byte> convertStringToBytes(const string& data);
+zmq::socket_t createZmqSocket(zmq::socket_type type);
 
 // 强制ROOT权限
 class AssertUserPriority

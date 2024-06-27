@@ -12,13 +12,14 @@ Station::Station()
     : log_(Log4cppWrapper::getLogger(8))
     , stationInfo_(make_shared<StationInfo>())
     , branchNum_(1)
+    , xftgPublisher_(miscellaneous::createZmqSocket(zmq::socket_type::pub))
 {
     poller_.setStationInfo(stationInfo_);
     initPollerSubscriberCallbacks();
     initPollerRespondCallbacks();
 
     // 策略消息发布
-    xftgPublisher_ = make_shared<ZmqPublish>("tcp://*:9100");
+    xftgPublisher_.bind("tcp://*:9100");
 
     /** 从配置文件中加载分支数量 */
     // branchNum_ = 1;
@@ -155,7 +156,7 @@ void Station::start()
 
         // 基于更新后的数据，执行策略
         for(auto& item : stationInfo_->branchList){
-            doXftgStrategy(*item.second);
+            // doXftgStrategy(*item.second);
         }
     }});
 }
@@ -213,133 +214,89 @@ void Station::doXftgStrategy(BranchInfo& branchInfo)
     auto serializedBody = msgpackWrapper::pack(params);//ExecStrategy
 
     const string topic{ "ExecStrategy" };
-    vector<byte> msgBuffer(reinterpret_cast<const byte*>(topic.data()),
-                                reinterpret_cast<const byte*>(topic.data() + topic.size()));
-    std::copy(reinterpret_cast<const byte*>(serializedBody.data()),
-                reinterpret_cast<const byte*>(serializedBody.data() + serializedBody.size()), std::back_inserter(msgBuffer));
-    xftgPublisher_->send(msgBuffer.data(), msgBuffer.size());
+    zmq::message_t msgbody(serializedBody.data(), serializedBody.size());
+    xftgPublisher_.send(zmq::message_t(topic), zmq::send_flags::sndmore);
+    xftgPublisher_.send(zmq::message_t(), zmq::send_flags::sndmore);// subtitle
+    xftgPublisher_.send(msgbody, zmq::send_flags::none);
 }
 
 void Station::initPollerSubscriberCallbacks()
 {
     using namespace std::placeholders;
     poller_.addSubscriber("tcp://127.0.0.1:6700", { "BauSummary" },
-            bind(&Station::bauReceiveCallback, this, _1, _2));
+            bind(&Station::bauReceiveCallback, this, _1, _2, _3, _4, _5));
     poller_.addSubscriber("tcp://127.0.0.1:6701", { "BcuStatus" },
-            bind(&Station::bcuReceiveCallback, this, _1, _2));
+            bind(&Station::bcuReceiveCallback, this, _1, _2, _3, _4, _5));
     poller_.addSubscriber("tcp://127.0.0.1:6702", { "BmuStatus" },
-            bind(&Station::bmuReceiveCallback, this, _1, _2));
+            bind(&Station::bmuReceiveCallback, this, _1, _2, _3, _4, _5));
     poller_.addSubscriber("tcp://127.0.0.1:6710", { "PcsSummary" },
-            bind(&Station::pcsReceiveCallback, this, _1, _2));
+            bind(&Station::pcsReceiveCallback, this, _1, _2, _3, _4, _5));
 }
 
 void Station::initPollerRespondCallbacks()
 {
     using namespace std::placeholders;
-    poller_.addRespondCallback("CellSystemGet",
-            bind(&bau::CellSystem::respondCallback, &cellSystem_, _1, _2));
-    poller_.addRespondCallback("HeapSystemGet", 
-            bind(&bau::HeapSystem::respondCallback, &heapSystem_, _1, _2));
-    poller_.addRespondCallback("BauRealtimeWarning",
-            bind(&bau::RealtimeWarning::respondCallbackBau, &bauRealtimeWarning_, _1, _2));
-    poller_.addRespondCallback("BcuRealtimeWarning",
-            bind(&bau::RealtimeWarning::respondCallbackBcu, &bauRealtimeWarning_, _1, _2));
-    poller_.addRespondCallback("BauSettingPowerOff",
-            bind(&bau::Setting::respondCallbacPowerOff, &bauSetting_, _1, _2));
-    poller_.addRespondCallback("BauSettingQuickStartup",
-            bind(&bau::Setting::respondCallbacQuickStartup, &bauSetting_, _1, _2));
-    poller_.addRespondCallback("BauSettingSetBcuRelay",
-            bind(&bau::Setting::respondCallbacSetBcuRelay, &bauSetting_, _1, _2));
+
+    /* BAU */
+    poller_.addRespondCallback(cellSystem_.identity(),
+            bind(&bau::CellSystem::respondCallback, &cellSystem_, _1, _2, _3, _4, _5));
+    poller_.addRespondCallback(heapSystem_.identity(), 
+            bind(&bau::HeapSystem::respondCallback, &heapSystem_, _1, _2, _3, _4, _5));
+    poller_.addRespondCallback(bauRealtimeWarning_.identity(),
+            bind(&bau::RealtimeWarning::respondCallback, &bauRealtimeWarning_, _1, _2, _3, _4, _5));
+    poller_.addRespondCallback(bauSetting_.identity(),
+            bind(&bau::Setting::respondCallback, &bauSetting_, _1, _2, _3, _4, _5));
+    /* PCS */
+    poller_.addRespondCallback(pcsRealtimeWarning_.identity(), 
+            bind(&pcs::RealtimeWarning::respondCallback, &pcsRealtimeWarning_, _1, _2, _3, _4, _5));
+    poller_.addRespondCallback(pcsSetting_.identity(),
+            bind(&pcs::Setting::respondCallback, &pcsSetting_, _1, _2, _3, _4, _5));
     
-    poller_.addRespondCallback("PcsRealtimeWarning", 
-            bind(&pcs::RealtimeWarning::respondCallback, &pcsRealtimeWarning_, _1, _2));
-    poller_.addRespondCallback("PcsSetting",
-            bind(&pcs::Setting::respondCallback, &pcsSetting_, _1, _2));
-    
-    poller_.addRespondCallback("MainWiringDiagramGet", 
-            bind(&MainWiringDiagram::respondCallback, &mainWiringDiagram_, _1, _2));
-    poller_.addRespondCallback("StorageEnergySystemGet", 
-            bind(&StorageEnergySystem::respondCallback, &storageEnergySystem_, _1, _2));
-    poller_.addRespondCallback("ProfitHomepageGet", 
-            bind(&Profit::respondCallback, &profit_, _1, _2));
-    poller_.addRespondCallback("BranchPublicInfoGet", 
-            bind(&PublicInfo::respondCallback, &publicInfo_, _1, _2));
-    
-    /* 操作记录 */
-    poller_.addRespondCallback("OperationRecordGet", 
-            bind(&OperationRecord::respondCallbackGet, &operationRecord_, _1, _2));
-    poller_.addRespondCallback("OperationRecordPageInfoGet",
-            bind(&OperationRecord::respondCallbackGetPageInfo, &operationRecord_, _1, _2));
-    
-    // 历史告警记录
-    poller_.addRespondCallback("WarningDeviceTree", 
-            bind(&HistoryWarning::respondCallbackGetWarningDeviceTree, &historyWarning_, _1, _2));
-    poller_.addRespondCallback("WarningRecordGet", 
-            bind(&HistoryWarning::respondCallbackGet, &historyWarning_, _1, _2));
-    poller_.addRespondCallback("WarningRecordPageInfoGet", 
-            bind(&HistoryWarning::respondCallbackGetPageInfo, &historyWarning_, _1, _2));
-    
+    /* 主接线图 */
+    poller_.addRespondCallback(mainWiringDiagram_.identity(), 
+            bind(&MainWiringDiagram::respondCallback, &mainWiringDiagram_, _1, _2, _3, _4, _5));
+    /* 储能系统 */
+    poller_.addRespondCallback(storageEnergySystem_.identity(), 
+            bind(&StorageEnergySystem::respondCallback, &storageEnergySystem_, _1, _2, _3, _4, _5));
+    /* 收益主页 */
+    poller_.addRespondCallback(profit_.identity(), 
+            bind(&Profit::respondCallback, &profit_, _1, _2, _3, _4, _5));
+    /* 公共信息 */
+    poller_.addRespondCallback(publicInfo_.dealerIdentity(), 
+            bind(&PublicInfo::respondCallback, &publicInfo_, _1, _2, _3, _4, _5));
+    /* 实时告警设备目录树 */
+    poller_.addRespondCallback(realtimeWarning_.identity(), 
+            bind(&RealtimeWarning::respondCallbackGetWarningDeviceTree, &realtimeWarning_, _1, _2, _3, _4, _5));
     /* 削峰填谷日计划 */
-    poller_.addRespondCallback("XftgDayPlanDurationDelete", 
-            bind(&xftg::DayPlanDuration::respondCallbackDelete, &xftgDayPlanDuration_, _1, _2));
-    poller_.addRespondCallback("XftgDayPlanDurationPut",
-            bind(&xftg::DayPlanDuration::respondCallbackPut, &xftgDayPlanDuration_, _1, _2));
-    poller_.addRespondCallback("XftgDayPlanDurationPost",
-            bind(&xftg::DayPlanDuration::respondCallbackPost, &xftgDayPlanDuration_, _1, _2));
-    
+    poller_.addRespondCallback(xftgDayPlanDuration_.identity(), 
+            bind(&xftg::DayPlanDuration::respondCallback, &xftgDayPlanDuration_, _1, _2, _3, _4, _5));
     /* 削峰填谷保护计划 */
-    poller_.addRespondCallback("XftgDayPlanProtectDelete", 
-            bind(&xftg::DayPlanProtect::respondCallbackDelete, &xftgDayPlanProtect_, _1, _2));
-    poller_.addRespondCallback("XftgDayPlanProtectPost", 
-            bind(&xftg::DayPlanProtect::respondCallbackPost, &xftgDayPlanProtect_, _1, _2));
-    poller_.addRespondCallback("XftgDayPlanProtectPut", 
-            bind(&xftg::DayPlanProtect::respondCallbackPut, &xftgDayPlanProtect_, _1, _2));
-    
+    poller_.addRespondCallback(xftgDayPlanProtect_.identity(), 
+            bind(&xftg::DayPlanProtect::respondCallback, &xftgDayPlanProtect_, _1, _2, _3, _4, _5));
     /* 削峰填谷周计划 */
-    poller_.addRespondCallback("XftgWeekPlanDelete", 
-            bind(&xftg::WeekPlan::respondCallbackDelete, &xftgWeekPlan_, _1, _2));
-    poller_.addRespondCallback("XftgWeekPlanPost", 
-            bind(&xftg::WeekPlan::respondCallbackPost, &xftgWeekPlan_, _1, _2));
-    poller_.addRespondCallback("XftgWeekPlanPut", 
-            bind(&xftg::WeekPlan::respondCallbackPut, &xftgWeekPlan_, _1, _2));
-    
+    poller_.addRespondCallback(xftgWeekPlan_.identity(), 
+            bind(&xftg::WeekPlan::respondCallback, &xftgWeekPlan_, _1, _2, _3, _4, _5));
     /* 削峰填谷自动运行标志 */
-    poller_.addRespondCallback("XftgAutoRunPut",
-            bind(&xftg::Setting::respondPutCallback, &xftgSetting_, _1, _2));
-    
+    poller_.addRespondCallback(xftgSetting_.identity(),
+            bind(&xftg::Setting::respondCallback, &xftgSetting_, _1, _2, _3, _4, _5));
     /* 电价日计划 */
-    poller_.addRespondCallback("ElectricityPriceDayPlanPost", 
-            bind(&electricity_price::DayPlan::respondCallbackPost, &profitDayPlan_, _1, _2));
-    poller_.addRespondCallback("ElectricityPriceDayPlanDelete", 
-            bind(&electricity_price::DayPlan::respondCallbackDelete, &profitDayPlan_, _1, _2));
-    poller_.addRespondCallback("ElectricityPriceDayPlanPut", 
-            bind(&electricity_price::DayPlan::respondCallbackPut, &profitDayPlan_, _1, _2));
-    
+    poller_.addRespondCallback(profitDayPlan_.identity(), 
+            bind(&electricity_price::DayPlan::respondCallback, &profitDayPlan_, _1, _2, _3, _4, _5));
     /* 电价月计划 */
-    poller_.addRespondCallback("ElectricityPriceMonthPlanPost", 
-            bind(&electricity_price::MonthPlan::respondCallbackPost, &profitMonthPlan_, _1, _2));
-    poller_.addRespondCallback("ElectricityPriceMonthPlanDelete", 
-            bind(&electricity_price::MonthPlan::respondCallbackDelete, &profitMonthPlan_, _1, _2));
-    poller_.addRespondCallback("ElectricityPriceMonthPlanPut", 
-            bind(&electricity_price::MonthPlan::respondCallbackPut, &profitMonthPlan_, _1, _2));
-
+    poller_.addRespondCallback(profitMonthPlan_.identity(), 
+            bind(&electricity_price::MonthPlan::respondCallback, &profitMonthPlan_, _1, _2, _3, _4, _5));
     /* 电价类型 */
-    poller_.addRespondCallback("ElectricityPriceTypeListPost", 
-            bind(&electricity_price::TypeList::respondCallbackPost, &profitTypeList_, _1, _2));
-    poller_.addRespondCallback("ElectricityPriceTypeListDelete", 
-            bind(&electricity_price::TypeList::respondCallbackDelete, &profitTypeList_, _1, _2));
-    poller_.addRespondCallback("ElectricityPriceTypeListPut", 
-            bind(&electricity_price::TypeList::respondCallbackPut, &profitTypeList_, _1, _2));
-    
-    poller_.addRespondCallback("DeviceTreeListGet",
-            bind(&DeviceTreeList::respondCallback, &deviceTreeList_, _1, _2));
-
+    poller_.addRespondCallback(profitTypeList_.identity(), 
+            bind(&electricity_price::TypeList::respondCallback, &profitTypeList_, _1, _2, _3, _4, _5));
+    /* 设备目录树 */
+    poller_.addRespondCallback(deviceTreeList_.identity(),
+            bind(&DeviceTreeList::respondCallback, &deviceTreeList_, _1, _2, _3, _4, _5));
 }
 
-void Station::parseBauTopicBauStatus(const string& message)
+void Station::parseBauTopicBauStatus(const vector<byte>& body)
 {
     tuple<int, bau::BingjiStatusSummary, bau::BauStatusSummary> requestBody;
-    const bool unpackResult = msgpackWrapper::unpack(message.data(), message.size(), requestBody);
+    const bool unpackResult = msgpackWrapper::unpack(body.data(), body.size(), requestBody);
 
     auto& [branchIndex, bingjiStatusSummaryNew, bauStatusSummaryNew] = requestBody;
 
@@ -387,10 +344,13 @@ void Station::parseBauTopicBauStatus(const string& message)
     }
 }
 
-void Station::bauReceiveCallback(const string& topic, const string& body)
+void Station::bauReceiveCallback(std::shared_ptr<StationInfo>& stationInfo, zmq::socket_t& subscriber,
+                            const vector<byte>& topic, const vector<byte>& subtitle, const vector<byte>& body)
 {
-    if(topic == "BauSummary") parseBauTopicBauStatus(body);
-    else if(topic == "Timeout"){
+    const auto topicPtr = reinterpret_cast<const char*>(topic.data());
+    const string topicString(topicPtr, topicPtr + topic.size());
+    if(topicString == "BauSummary") parseBauTopicBauStatus(body);
+    else if(topicString == "Timeout"){
 
         int branchIndex;
         std::memcpy(&branchIndex, body.data() + body.size(), sizeof(int));
@@ -624,11 +584,14 @@ void Station::updatePcsWarningAndFaultMap(pcs::PcsInfo& pcsInfo, const uint16_t 
     if(faultStatus.warning2_ctOrHallOpenCircuitFault) ++pcsInfo.faultCount;
 }
 
-void Station::bcuReceiveCallback(const string& topic, const string& body)
+void Station::bcuReceiveCallback(std::shared_ptr<StationInfo>& stationInfo, zmq::socket_t& subscriber,
+                            const vector<byte>& topic, const vector<byte>& subtitle, const vector<byte>& body)
 {
 try
 {
-    if(topic == "BcuStatus"){
+    const auto topicPtr = reinterpret_cast<const char*>(topic.data());
+    const string topicString(topicPtr, topicPtr + topic.size());
+    if(topicString == "BcuStatus"){
         tuple<int, int, bau::BcuStatusSummary> requestBody;
         const bool unpackResult = msgpackWrapper::unpack(body.data(), body.size(), requestBody);
 
@@ -660,11 +623,14 @@ catch(const std::exception& e){
 }
 }
 
-void Station::bmuReceiveCallback(const string& topic, const string& body)
+void Station::bmuReceiveCallback(std::shared_ptr<StationInfo>& stationInfo, zmq::socket_t& subscriber,
+                            const vector<byte>& topic, const vector<byte>& subtitle, const vector<byte>& body)
 {
 try
 {
-    if(topic == "BmuStatus"){
+    const auto topicPtr = reinterpret_cast<const char*>(topic.data());
+    const string topicString(topicPtr, topicPtr + topic.size());
+    if(topicString == "BmuStatus"){
         tuple<int, int, int, bau::CellvoltSummary, bau::CelltemSummary> requestBody;
         const bool unserializedResult = msgpackWrapper::unpack(body.data(), body.size(), requestBody);
         BOOST_ASSERT(unserializedResult);
@@ -697,9 +663,12 @@ catch(const std::exception& e){
 }
 }
 
-void Station::pcsReceiveCallback(const string& topic, const string& body)
-{   
-    if(topic == "PcsSummary"){
+void Station::pcsReceiveCallback(std::shared_ptr<StationInfo>& stationInfo, zmq::socket_t& subscriber,
+                            const vector<byte>& topic, const vector<byte>& subtitle, const vector<byte>& body)
+{
+    const auto topicPtr = reinterpret_cast<const char*>(topic.data());
+    const string topicString(topicPtr, topicPtr + topic.size());
+    if(topicString == "PcsSummary"){
         tuple<int, pcs::_0406_0460_Summary, pcs::_0474_04D0_Summary> requestBody;
         const bool unpackResult = msgpackWrapper::unpack(body.data(), body.size(), requestBody);
 

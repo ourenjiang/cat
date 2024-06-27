@@ -285,6 +285,9 @@ vector<uint8_t> ems::miscellaneous::createModbusRtuWriteFrame(const uint8_t devA
 
 Json::Value ems::miscellaneous::unserializedJson(const string& jsonstring)
 {
+    if(jsonstring.empty())
+        throw std::runtime_error("request body empty");
+    
     JSONCPP_STRING err;
     Json::Value root;
     Json::CharReaderBuilder builder;
@@ -330,6 +333,12 @@ vector<byte> ems::miscellaneous::convertStringToBytes(const string& data)
 {
     return { reinterpret_cast<const byte*>(data.data()),
             reinterpret_cast<const byte*>(data.data()) + data.size() };
+}
+
+zmq::socket_t ems::miscellaneous::createZmqSocket(zmq::socket_type type)
+{
+    static zmq::context_t context;
+    return zmq::socket_t(context, type);
 }
 
 AssertUserPriority::AssertUserPriority()

@@ -12,93 +12,32 @@ HistoryWarning::HistoryWarning()
 {
     createTable();
     registerHttpInterfaces();
-
-    requester_ = make_unique<ZmqRequest>("tcp://127.0.0.1:6200");
 }
+
 void HistoryWarning::registerHttpInterfaces()
 {
     using namespace std::placeholders;
     auto& serv = utils::getHttpServerSingleton();
-    serv.Get("/warning", httplib::Server::Handler(bind(&HistoryWarning::requestCallbackGet, this, _1, _2)));
-    serv.Get("/warningPageInfo", httplib::Server::Handler(bind(&HistoryWarning::requestCallbackGetPageInfo, this, _1, _2)));
-    serv.Get("/warningDeviceTree", httplib::Server::Handler(bind(&HistoryWarning::requestCallbackGetWarningDeviceTree, this, _1, _2)));
+    serv.Post("/historyWarning", httplib::Server::Handler(bind(&HistoryWarning::requestCallbackGet, this, _1, _2)));
+    serv.Post("/historyWarningPageInfo", httplib::Server::Handler(bind(&HistoryWarning::requestCallbackGetPageInfo, this, _1, _2)));
 }
 
 void HistoryWarning::requestCallbackGet(const httplib::Request &req, httplib::Response &res)
 {
 try
 {
-    if(!req.has_param("pageSize") || !req.has_param("pageIndex"))
+    const auto reqbody = miscellaneous::unserializedJson(req.body);
+    if(!reqbody.isMember("pageSize") || !reqbody.isMember("pageIndex"))
         throw std::invalid_argument("invalid params");
-    const string pageSize = req.get_param_value("pageSize");
-    const string pageIndex = req.get_param_value("pageIndex");
+    const string pageSize = reqbody["pageSize"].asString();
+    const string pageIndex = reqbody["pageIndex"].asString();
 
-    const string level = req.has_param("level") ? req.get_param_value("level") : "";
-    const string deviceName = req.has_param("deviceName") ? req.get_param_value("deviceName") : "";
-    const string beginTime = req.has_param("beginTime") ? req.get_param_value("beginTime") : "";
-    const string endTime = req.has_param("endTime") ? req.get_param_value("endTime") : "";
-    const string actionType = req.has_param("actionType") ? req.get_param_value("actionType") : "";
-    const string processed = req.has_param("processed") ? req.get_param_value("processed") : "";
-
-    // 准备请求参数
-    tuple<string, string, string,
-            string, string, string, string, string> workParams{ pageSize, pageIndex,
-                        level, deviceName, beginTime, endTime, actionType, processed };
-    auto serializedMsg = msgpackWrapper::pack(workParams);
-    // 准备请求消息
-    string publishContent;
-    const string topic = miscellaneous::createFixedSizeString("WarningRecordGet");
-    std::copy(topic.data(), topic.data() + topic.size(), std::back_inserter(publishContent));
-    std::copy(serializedMsg.data(), serializedMsg.data() + serializedMsg.size(), std::back_inserter(publishContent));
-    // 发送消息
-    const vector<byte> sendmsg(reinterpret_cast<byte*>(publishContent.data()),
-                                reinterpret_cast<byte*>(publishContent.data()) + publishContent.size());
-    const bool sendResult = requester_->send(sendmsg);
-    if(!sendResult) throw std::runtime_error("zmq send err");
-    // 接收消息
-    const auto recvResult = requester_->recv();
-    if(!recvResult) throw std::runtime_error("zmq recv failed");
-    const auto recvmsg = recvResult.value();
-
-    // 先解析标准的响应消息
-    pair<bool, vector<byte>> respondMsg;
-    const bool unpackMsgResult = msgpackWrapper::unpack(recvmsg.data(), recvmsg.size(), respondMsg);
-    BOOST_ASSERT(unpackMsgResult);
-    const auto& [returnStatus, returnContent] = respondMsg;
-    if(!returnStatus){
-        // 再解析自定义的响应内容
-        const string errmsg(reinterpret_cast<const char*>(returnContent.data()),
-                                    reinterpret_cast<const char*>(returnContent.data()) + returnContent.size());
-        throw std::runtime_error(errmsg);
-    }
-
-    // 再解析自定义的响应内容
-    const string respondContent(reinterpret_cast<const char*>(returnContent.data()),
-                                reinterpret_cast<const char*>(returnContent.data()) + returnContent.size());
-    
-    // 成功响应
-    Json::Value repJson;
-    repJson["data"] = miscellaneous::unserializedJson(respondContent);
-    repJson["errcode"] = 0;
-    repJson["errmsg"] = "success";
-    utils::httpRespond(res, repJson);
-}
-catch(const std::exception& e){
-    Json::Value msg;
-    msg["data"] = Json::Value(Json::arrayValue);
-    msg["errcode"] = -1;
-    msg["errmsg"] = e.what();
-    utils::httpRespond(res, msg);
-}
-}
-
-vector<byte> HistoryWarning::respondCallbackGet(std::shared_ptr<StationInfo> stationInfo, const vector<byte>& msgbody) const
-{
-    tuple<string, string, string,
-        string, string, string, string, string> reqbody;
-    const bool unpackResult = msgpackWrapper::unpack(msgbody.data(), msgbody.size(), reqbody);
-    const auto& [ pageSize, pageIndex, level,
-            deviceName, beginTime, endTime, actionType, processed ] = reqbody;
+    const string level = reqbody.isMember("level") ? reqbody["level"].asString() : "";
+    const string deviceName = reqbody.isMember("deviceName") ? reqbody["deviceName"].asString() : "";
+    const string beginTime = reqbody.isMember("beginTime") ? reqbody["beginTime"].asString() : "";
+    const string endTime = reqbody.isMember("endTime") ? reqbody["endTime"].asString() : "";
+    const string actionType = reqbody.isMember("actionType") ? reqbody["actionType"].asString() : "";
+    const string processed = reqbody.isMember("processed") ? reqbody["processed"].asString() : "";
 
     const auto getResult = getRecord(pageSize, pageIndex, level,
                                     deviceName, beginTime, endTime, actionType, processed);
@@ -113,170 +52,55 @@ vector<byte> HistoryWarning::respondCallbackGet(std::shared_ptr<StationInfo> sta
         node["processed"] = std::get<5>(item);
         root.append(node);
     }
-    return miscellaneous::serializedJsonAsBytes(root);
-}
-
-vector<byte> HistoryWarning::respondCallbackGetPageInfo(std::shared_ptr<StationInfo> stationInfo, const vector<byte>& msgbody) const
-{
-    tuple<string, string, string, string, string, string, string> params;
-    const bool unpackResult = msgpackWrapper::unpack(msgbody.data(), msgbody.size(), params);
-    auto [ pageSize, level, deviceName, beginTime, endTime, actionType, processed ] = params;
-
-    tuple<bool, vector<string>> respondResult{ false, {} };
-    const auto getResult = getRecordPageInfo(pageSize, level, deviceName, beginTime, endTime, actionType, processed);
-
-    Json::Value root;
-    root["totalCount"] = std::get<0>(getResult);
-    root["pageNum"] = std::get<1>(getResult);
-    root["pageSize"] = std::get<2>(getResult);
-    return miscellaneous::serializedJsonAsBytes(root);
-}
-
-vector<byte> HistoryWarning::respondCallbackGetWarningDeviceTree(std::shared_ptr<StationInfo> stationInfo, const vector<byte>& msgbody)
-{
-    Json::Value root(Json::arrayValue);
-    for(const auto& item: stationInfo->branchList){
-
-        Json::Value branchData;
-        branchData["branchIndex"] = item.first;
-        {
-            auto& branchInfo = item.second;
-            const auto& bauInfo = branchInfo->bauInfo;
-            Json::Value bauData;
-            bauData["bauActive"] = bauInfo.existActiveWarningOrFault ? "true": "false";
-
-            for(const auto& bcu: bauInfo.bcuList){
-
-                const auto& bcuInfo = bcu.second;
-                Json::Value bcuData;
-                bcuData["bcuIndex"] = to_string(bcu.first);
-                bcuData["bcuActive"] = bcuInfo.existActiveWarningOrFault ? "true": "false";
-                bauData["bcu"].append(bcuData);
-            }
-            branchData["bau"] = bauData;
-        }
-        {
-            auto& branchInfo = item.second;
-            const auto& pcsInfo = branchInfo->pcsInfo;
-            branchData["pcsActive"] = pcsInfo.existActiveWarningOrFault ? "true": "false";
-        }
-        root.append(branchData);
-    }
-    return miscellaneous::serializedJsonAsBytes(root);
-}
-
-void HistoryWarning::requestCallbackGetPageInfo(const httplib::Request &req, httplib::Response &res)
-{
-try
-{
-    if(!req.has_param("pageSize")){
-        throw std::invalid_argument("invalid params");
-    }
-    const string pageSize = req.get_param_value("pageSize");
-
-    const string level = req.has_param("level") ? req.get_param_value("level") : "";
-    const string deviceName = req.has_param("deviceName") ? req.get_param_value("deviceName") : "";
-    const string beginTime = req.has_param("beginTime") ? req.get_param_value("beginTime") : "";
-    const string endTime = req.has_param("endTime") ? req.get_param_value("endTime") : "";
-    const string actionType = req.has_param("actionType") ? req.get_param_value("actionType") : "";
-    const string processed = req.has_param("processed") ? req.get_param_value("processed") : "";
-
-
-    tuple<string, string, string, string, string, string, string> requestMsg{ pageSize,
-                                            level, deviceName, beginTime, endTime, actionType, processed };
-    auto serializedMsg = msgpackWrapper::pack(requestMsg);
-
-    string publishContent;
-    const string topic = miscellaneous::createFixedSizeString("WarningRecordPageInfoGet");
-    std::copy(topic.data(), topic.data() + topic.size(), std::back_inserter(publishContent));
-    std::copy(serializedMsg.data(), serializedMsg.data() + serializedMsg.size(),
-              std::back_inserter(publishContent));
-
-    const vector<byte> sendmsg(reinterpret_cast<byte*>(publishContent.data()),
-                                reinterpret_cast<byte*>(publishContent.data()) + publishContent.size());
-    const bool sendResult = requester_->send(sendmsg);
-    if(!sendResult) throw std::runtime_error("zmq send err");
-
-    // 接收
-    const auto recvResult = requester_->recv();
-    if(!recvResult) throw std::runtime_error("zmq recv failed");
-    const auto recvmsg = recvResult.value();
     
-    // 先解析标准的响应消息
-    pair<bool, vector<byte>> respondMsg;
-    const bool unpackMsgResult = msgpackWrapper::unpack(recvmsg.data(), recvmsg.size(), respondMsg);
-    BOOST_ASSERT(unpackMsgResult);
-    const auto& [returnStatus, returnContent] = respondMsg;
-    if(!returnStatus){
-        // 再解析自定义的响应内容
-        const string errmsg(reinterpret_cast<const char*>(returnContent.data()),
-                                    reinterpret_cast<const char*>(returnContent.data()) + returnContent.size());
-        throw std::runtime_error(errmsg);
-    }
-
-    // 再解析自定义的响应内容
-    const string respondContent(reinterpret_cast<const char*>(returnContent.data()),
-                                reinterpret_cast<const char*>(returnContent.data()) + returnContent.size());
-
     // 成功响应
     Json::Value repJson;
-    repJson["data"] = miscellaneous::unserializedJson(respondContent);
+    // repJson["data"] = miscellaneous::unserializedJson(respondContent);
+    repJson["data"] = root;
     repJson["errcode"] = 0;
     repJson["errmsg"] = "success";
     utils::httpRespond(res, repJson);
 }
 catch(const std::exception& e){
     Json::Value msg;
-    msg["data"] = Json::Value(Json::objectValue);
+    msg["data"] = Json::Value(Json::arrayValue);
     msg["errcode"] = -1;
     msg["errmsg"] = e.what();
     utils::httpRespond(res, msg);
 }
 }
 
-void HistoryWarning::requestCallbackGetWarningDeviceTree(const httplib::Request &req, httplib::Response &res)
+void HistoryWarning::requestCallbackGetPageInfo(const httplib::Request &req, httplib::Response &res)
 {
 try
 {
-    // 准备请求消息
-    string publishContent;
-    const string topic = miscellaneous::createFixedSizeString("WarningDeviceTree");
-    std::copy(topic.data(), topic.data() + topic.size(), std::back_inserter(publishContent));
+    const auto reqbody = miscellaneous::unserializedJson(req.body);
+    if(!reqbody.isMember("pageSize"))
+        throw std::invalid_argument("invalid params");
+    const string pageSize = reqbody["pageSize"].asString();
 
-    // 发送消息
-    const vector<byte> sendmsg(reinterpret_cast<byte*>(publishContent.data()),
-                                reinterpret_cast<byte*>(publishContent.data()) + publishContent.size());
-    const bool sendResult = requester_->send(sendmsg);
-    if(!sendResult) throw std::runtime_error("zmq send err");
+    const string level = reqbody.isMember("level") ? reqbody["level"].asString() : "";
+    const string deviceName = reqbody.isMember("deviceName") ? reqbody["deviceName"].asString() : "";
+    const string beginTime = reqbody.isMember("beginTime") ? reqbody["beginTime"].asString() : "";
+    const string endTime = reqbody.isMember("endTime") ? reqbody["endTime"].asString() : "";
+    const string actionType = reqbody.isMember("actionType") ? reqbody["actionType"].asString() : "";
+    const string processed = reqbody.isMember("processed") ? reqbody["processed"].asString() : "";
 
-    // 接收消息
-    const auto recvResult = requester_->recv();
-    if(!recvResult) throw std::runtime_error("zmq recv failed");
-    const auto recvmsg = recvResult.value();
+    const auto getResult = getRecordPageInfo(pageSize, level, deviceName, beginTime, endTime, actionType, processed);
 
-    // 先解析标准的响应消息
-    pair<bool, vector<byte>> respondMsg;
-    const bool unpackMsgResult = msgpackWrapper::unpack(recvmsg.data(), recvmsg.size(), respondMsg);
-    BOOST_ASSERT(unpackMsgResult);
-    const auto& [returnStatus, returnContent] = respondMsg;
-    if(!returnStatus){
-        const string errmsg(reinterpret_cast<const char*>(returnContent.data()),
-                                    reinterpret_cast<const char*>(returnContent.data()) + returnContent.size());
-        throw std::runtime_error(errmsg);
-    }
+    Json::Value root;
+    root["totalCount"] = std::get<0>(getResult);
+    root["pageNum"] = std::get<1>(getResult);
+    root["pageSize"] = std::get<2>(getResult);
 
-    // 再解析自定义的响应内容
-    const string jsonString(reinterpret_cast<const char*>(returnContent.data()),
-                                reinterpret_cast<const char*>(returnContent.data()) + returnContent.size());
-
+    // 成功响应
     Json::Value repJson;
-    repJson["data"] = miscellaneous::unserializedJson(jsonString);
+    repJson["data"] = root;
     repJson["errcode"] = 0;
     repJson["errmsg"] = "success";
     utils::httpRespond(res, repJson);
 }
 catch(const std::exception& e){
-    // 失败响应
     Json::Value msg;
     msg["data"] = Json::Value(Json::objectValue);
     msg["errcode"] = -1;

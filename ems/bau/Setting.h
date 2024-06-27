@@ -13,19 +13,27 @@ class Setting
 {
 public:
     Setting();
-    vector<byte> respondCallbacPowerOff(std::shared_ptr<StationInfo> stationInfo, const vector<byte>& msgbody);
-    vector<byte> respondCallbacQuickStartup(std::shared_ptr<StationInfo> stationInfo, const vector<byte>& msgbody);
-    vector<byte> respondCallbacSetBcuRelay(std::shared_ptr<StationInfo> stationInfo, const vector<byte>& msgbody);
+    void respondCallback(std::shared_ptr<StationInfo> stationInfo, zmq::socket_t& router,
+                        const vector<byte>& identity, const vector<byte>& subtitle, const vector<byte>& body);
+    void respondCallbacPowerOff(std::shared_ptr<StationInfo> stationInfo, zmq::socket_t& router,
+                                const vector<byte>& identity, const vector<byte>& body);
+    void respondCallbacQuickStartup(std::shared_ptr<StationInfo> stationInfo, zmq::socket_t& router,
+                                    const vector<byte>& identity, const vector<byte>& body);
+    void respondCallbacSetBcuRelay(std::shared_ptr<StationInfo> stationInfo, zmq::socket_t& router,
+                                    const vector<byte>& identity, const vector<byte>& body);
+    vector<byte> identity();
 private:
     void registerHttpInterfaces();// 数据发布
     void requestCallbackPowerOff(const httplib::Request &req, httplib::Response &res);
     void requestCallbackQuickStartup(const httplib::Request &req, httplib::Response &res);
     void requestCallbackSetBcuRelay(const httplib::Request &req, httplib::Response &res);
 
-    std::unique_ptr<ZmqRequest> stationRequester_;
-    // std::shared_ptr<ZmqRequest> bauRequester_;
-    zmq::context_t zmqContext_;
-    zmq::socket_t zmqDealerBau_;
+    const string identity_;
+    const string powerOffSubtitle_;
+    const string quickStartupSubtitle_;
+    const string setBcuRelaySubtitle_;
+    zmq::socket_t stationDealer_;
+    zmq::socket_t bauDealer_;
 };
 
 }//namespace bau

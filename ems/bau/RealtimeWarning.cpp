@@ -9,17 +9,29 @@
 using namespace ems::bau;
 
 RealtimeWarning::RealtimeWarning()
+    : identity_("BauRealtimeWarning")
+    , dealer_(miscellaneous::createZmqSocket(zmq::socket_type::dealer))
+    , bauSubtitle_("Bau")
+    , bcuSubtitle_("Bcu")
 {
     registerHttpInterfaces();
 
-    requester_ = make_unique<ZmqRequest>("tcp://127.0.0.1:6200");
+    dealer_.set(zmq::sockopt::routing_id, identity_);
+    dealer_.connect("tcp://127.0.0.1:6200");
 }
+
 void RealtimeWarning::registerHttpInterfaces()
 {
     using namespace std::placeholders;
     auto& serv = utils::getHttpServerSingleton();
-    serv.Get("/bauWarningAndFault", httplib::Server::Handler(bind(&RealtimeWarning::requestCallbackBau, this, _1, _2)));
-    serv.Get("/bcuWarningAndFault", httplib::Server::Handler(bind(&RealtimeWarning::requestCallbackBcu, this, _1, _2)));
+    serv.Get("/bauRealtimeWarning", httplib::Server::Handler(bind(&RealtimeWarning::requestCallbackBau, this, _1, _2)));
+    serv.Get("/bcuRealtimeWarning", httplib::Server::Handler(bind(&RealtimeWarning::requestCallbackBcu, this, _1, _2)));
+}
+
+vector<byte> RealtimeWarning::identity()
+{
+    const auto beginItr = reinterpret_cast<const byte*>(identity_.data());
+    return { beginItr, beginItr + identity_.size() };
 }
 
 void RealtimeWarning::requestCallbackBau(const httplib::Request &req, httplib::Response &res)
@@ -28,30 +40,20 @@ try
 {
     if(!req.has_param("branchIndex"))
         throw std::runtime_error("request params err");
-    tuple<string> workParams{ req.get_param_value("branchIndex") };
 
-    // 准备请求参数
-    auto serializedMsg = msgpackWrapper::pack(workParams);
     // 准备请求消息
-    string publishContent;
-    const string topic = miscellaneous::createFixedSizeString("BauRealtimeWarning");
-    std::copy(topic.data(), topic.data() + topic.size(), std::back_inserter(publishContent));
-    std::copy(serializedMsg.data(), serializedMsg.data() + serializedMsg.size(), std::back_inserter(publishContent));
-
-    // 发送消息
-    const vector<byte> sendmsg(reinterpret_cast<byte*>(publishContent.data()),
-                                reinterpret_cast<byte*>(publishContent.data()) + publishContent.size());
-    const bool sendResult = requester_->send(sendmsg);
-    if(!sendResult) throw std::runtime_error("zmq send err");
-
+    const string workParams = req.get_param_value("branchIndex");
+    auto serializedMsg = msgpackWrapper::pack(workParams);
+    zmq::message_t sndmsg(serializedMsg.data(), serializedMsg.size());
+    dealer_.send(zmq::message_t(bauSubtitle_), zmq::send_flags::sndmore);
+    dealer_.send(sndmsg, zmq::send_flags::none);
     // 接收消息
-    const auto recvResult = requester_->recv();
-    if(!recvResult) throw std::runtime_error("zmq recv failed");
-    const auto recvmsg = recvResult.value();
+    zmq::message_t rcvmsg;
+    (void)dealer_.recv(rcvmsg);
 
     // 先解析标准的响应消息
     pair<bool, vector<byte>> respondMsg;
-    const bool unpackMsgResult = msgpackWrapper::unpack(recvmsg.data(), recvmsg.size(), respondMsg);
+    const bool unpackMsgResult = msgpackWrapper::unpack(rcvmsg.data(), rcvmsg.size(), respondMsg);
     BOOST_ASSERT(unpackMsgResult);
     const auto& [returnStatus, returnContent] = respondMsg;
     if(!returnStatus){
@@ -62,12 +64,12 @@ try
     }
 
     // 再解析自定义的响应内容
-    const string respondContent(reinterpret_cast<const char*>(returnContent.data()),
+    const string jsonString(reinterpret_cast<const char*>(returnContent.data()),
                                 reinterpret_cast<const char*>(returnContent.data()) + returnContent.size());
     
     // 成功响应
     Json::Value repJson;
-    repJson["data"] = miscellaneous::unserializedJson(respondContent);
+    repJson["data"] = miscellaneous::unserializedJson(jsonString);
     repJson["errcode"] = 0;
     repJson["errmsg"] = "success";
     utils::httpRespond(res, repJson);
@@ -88,29 +90,19 @@ try
     if(!req.has_param("branchIndex") || !req.has_param("bcuIndex"))
         throw std::runtime_error("request params err");
 
-    tuple<string, string> workParams{ req.get_param_value("branchIndex"), req.get_param_value("bcuIndex") };
     // 准备请求参数
+    tuple<string, string> workParams{ req.get_param_value("branchIndex"), req.get_param_value("bcuIndex") };
     auto serializedMsg = msgpackWrapper::pack(workParams);
-    // 准备请求消息
-    string publishContent;
-    const string topic = miscellaneous::createFixedSizeString("BcuRealtimeWarning");
-    std::copy(topic.data(), topic.data() + topic.size(), std::back_inserter(publishContent));
-    std::copy(serializedMsg.data(), serializedMsg.data() + serializedMsg.size(), std::back_inserter(publishContent));
-
-    // 发送消息
-    const vector<byte> sendmsg(reinterpret_cast<byte*>(publishContent.data()),
-                                reinterpret_cast<byte*>(publishContent.data()) + publishContent.size());
-    const bool sendResult = requester_->send(sendmsg);
-    if(!sendResult) throw std::runtime_error("zmq send err");
-
+    zmq::message_t sndmsg(serializedMsg.data(), serializedMsg.size());
+    dealer_.send(zmq::message_t(bcuSubtitle_), zmq::send_flags::sndmore);
+    dealer_.send(sndmsg, zmq::send_flags::none);
     // 接收消息
-    const auto recvResult = requester_->recv();
-    if(!recvResult) throw std::runtime_error("zmq recv failed");
-    const auto recvmsg = recvResult.value();
+    zmq::message_t rcvmsg;
+    (void)dealer_.recv(rcvmsg);
 
     // 先解析标准的响应消息
     pair<bool, vector<byte>> respondMsg;
-    const bool unpackMsgResult = msgpackWrapper::unpack(recvmsg.data(), recvmsg.size(), respondMsg);
+    const bool unpackMsgResult = msgpackWrapper::unpack(rcvmsg.data(), rcvmsg.size(), respondMsg);
     BOOST_ASSERT(unpackMsgResult);
     const auto& [returnStatus, returnContent] = respondMsg;
     if(!returnStatus){
@@ -121,12 +113,12 @@ try
     }
 
     // 再解析自定义的响应内容
-    const string respondContent(reinterpret_cast<const char*>(returnContent.data()),
+    const string jsonString(reinterpret_cast<const char*>(returnContent.data()),
                                 reinterpret_cast<const char*>(returnContent.data()) + returnContent.size());
 
     // 成功响应
     Json::Value repJson;
-    repJson["data"] = miscellaneous::unserializedJson(respondContent);
+    repJson["data"] = miscellaneous::unserializedJson(jsonString);
     repJson["errcode"] = 0;
     repJson["errmsg"] = "success";
     utils::httpRespond(res, repJson);
@@ -140,7 +132,9 @@ catch(const std::exception& e){
 }
 }
 
-vector<byte> RealtimeWarning::respondCallbackBcu(std::shared_ptr<StationInfo> stationInfo, const vector<byte>& msgbody)
+void RealtimeWarning::respondCallbackBcu(std::shared_ptr<StationInfo> stationInfo, const vector<byte>& msgbody, zmq::socket_t& router, const vector<byte>& identity)
+{
+try
 {
     tuple<string, string> reqbody;
     const bool unpackResult = msgpackWrapper::unpack(msgbody.data(), msgbody.size(), reqbody);
@@ -214,14 +208,51 @@ vector<byte> RealtimeWarning::respondCallbackBcu(std::shared_ptr<StationInfo> st
     faultData["samplingBoardCommFault"] = to_string(faultStatus.samplingBoardCommFault);
     faultData["curDiverterFault"] = to_string(faultStatus.curDiverterFault);
     faultData["ntcFault"] = to_string(faultStatus.ntcFault);
-    return miscellaneous::serializedJsonAsBytes(root);
+
+    {
+        const vector<byte> repcontent = miscellaneous::serializedJsonAsBytes(root);
+        const pair<bool, vector<byte>> repbody{ true, repcontent };
+        const msgpack::sbuffer repbodySerialized = msgpackWrapper::pack(repbody);
+
+        zmq::message_t identitymsg(identity.data(), identity.size());
+        zmq::message_t repmsg(repbodySerialized.data(), repbodySerialized.size());
+        router.send(identitymsg, zmq::send_flags::sndmore);
+        router.send(repmsg, zmq::send_flags::none);
+    }
+}
+catch(const std::exception& e){
+    const vector<byte> repcontent = miscellaneous::convertStringToBytes(e.what());
+    const pair<bool, vector<byte>> repbody{ false, repcontent };
+    const msgpack::sbuffer repbodySerialized = msgpackWrapper::pack(repbody);
+
+    zmq::message_t identitymsg(identity.data(), identity.size());
+    zmq::message_t repmsg(repbodySerialized.data(), repbodySerialized.size());
+    router.send(identitymsg, zmq::send_flags::sndmore);
+    router.send(repmsg, zmq::send_flags::none);
+}
 }
 
-vector<byte> RealtimeWarning::respondCallbackBau(std::shared_ptr<StationInfo> stationInfo, const vector<byte>& msgbody)
+void RealtimeWarning::respondCallback(std::shared_ptr<StationInfo> stationInfo, zmq::socket_t& router,
+                        const vector<byte>& identity, const vector<byte>& subtitle, const vector<byte>& body)
 {
-    tuple<string> reqbody;
+    const string subtitleString(reinterpret_cast<const char*>(subtitle.data()),
+        reinterpret_cast<const char*>(subtitle.data()) + subtitle.size());
+    BOOST_ASSERT(subtitleString == bauSubtitle_ || subtitleString == bcuSubtitle_ );
+    if(subtitleString == bauSubtitle_){
+        respondCallbackBau(stationInfo, body, router, identity);
+    }
+    else if(subtitleString == bcuSubtitle_){
+        respondCallbackBcu(stationInfo, body, router, identity);
+    }
+}
+
+void RealtimeWarning::respondCallbackBau(std::shared_ptr<StationInfo> stationInfo, const vector<byte>& msgbody, zmq::socket_t& router, const vector<byte>& identity)
+{
+try
+{
+    string reqbody;
     const bool unpackResult = msgpackWrapper::unpack(msgbody.data(), msgbody.size(), reqbody);
-    auto& [branchIndex] = reqbody;
+    const string branchIndex = reqbody;
 
     auto& branchList = stationInfo->branchList;
     auto branchItr = branchList.find(std::stoi(branchIndex));
@@ -270,9 +301,25 @@ vector<byte> RealtimeWarning::respondCallbackBau(std::shared_ptr<StationInfo> st
     faultData["rs485Err"] = to_string(faultStatus.rs485Err);
     faultData["bcuVersionErr"] = to_string(faultStatus.bcuVersionErr);
 
-    Json::StreamWriterBuilder builder;
-    builder["indentation"] = "";
-    const string jsonString = Json::writeString(builder, root);
-    return { reinterpret_cast<const byte*>(jsonString.data()),
-                reinterpret_cast<const byte*>(jsonString.data()) + jsonString.size() };
+    {
+        const vector<byte> repcontent = miscellaneous::serializedJsonAsBytes(root);
+        const pair<bool, vector<byte>> repbody{ true, repcontent };
+        const msgpack::sbuffer repbodySerialized = msgpackWrapper::pack(repbody);
+
+        zmq::message_t identitymsg(identity.data(), identity.size());
+        zmq::message_t repmsg(repbodySerialized.data(), repbodySerialized.size());
+        router.send(identitymsg, zmq::send_flags::sndmore);
+        router.send(repmsg, zmq::send_flags::none);
+    }
+}
+catch(const std::exception& e){
+    const vector<byte> repcontent = miscellaneous::convertStringToBytes(e.what());
+    const pair<bool, vector<byte>> repbody{ false, repcontent };
+    const msgpack::sbuffer repbodySerialized = msgpackWrapper::pack(repbody);
+
+    zmq::message_t identitymsg(identity.data(), identity.size());
+    zmq::message_t repmsg(repbodySerialized.data(), repbodySerialized.size());
+    router.send(identitymsg, zmq::send_flags::sndmore);
+    router.send(repmsg, zmq::send_flags::none);
+}
 }

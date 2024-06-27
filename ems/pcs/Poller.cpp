@@ -14,8 +14,8 @@ using namespace ems::pcs;
 Poller::Poller()
     : log_(ems::Log4cppWrapper::getLogger(4))
     , timer_(io_service_, asio::chrono::milliseconds(1000))
-    , zmqDealer_(zmqContext_, zmq::socket_type::dealer)
-    , zmqPublisher_(zmqContext_, zmq::socket_type::pub)
+    , zmqDealer_(miscellaneous::createZmqSocket(zmq::socket_type::dealer))
+    , zmqPublisher_(miscellaneous::createZmqSocket(zmq::socket_type::pub))
 {
     {
         auto& cfgRoot = YamlcppWrapper::getRoot();
@@ -49,7 +49,6 @@ void Poller::initPublishInterface(const std::string& ip, const uint16_t port)
     publishPort_ = port;
 
     // 初始化发布接口
-    // publisher_ = make_unique<ZmqPublish>(ip + to_string(port));
     zmqPublisher_.bind(ip + to_string(port));
 }
 
@@ -251,18 +250,13 @@ _0474_04D0_Summary Poller::createSummary_0474_04D0(const vector<uint16_t>& frame
 
 void Poller::publish(const string& topic, const int location, const _0406_0460_Summary& obj_0406_0460_Summary, const _0474_04D0_Summary& obj_0474_04D0_Summary)
 {
-    // vector<byte> msgBuffer(reinterpret_cast<const byte*>(topic.data()),
-    //                             reinterpret_cast<const byte*>(topic.data() + topic.size()));
     auto msgBody = make_tuple(location, obj_0406_0460_Summary, obj_0474_04D0_Summary);
 
     auto serializedBody = msgpackWrapper::pack(msgBody);
-    // std::copy(reinterpret_cast<const byte*>(serializedBody.data()),
-    //             reinterpret_cast<const byte*>(serializedBody.data() + serializedBody.size()), std::back_inserter(msgBuffer));
     zmq::message_t msgbody(serializedBody.data(), serializedBody.size());
     zmqPublisher_.send(zmq::message_t(topic), zmq::send_flags::sndmore);
+    zmqPublisher_.send(zmq::message_t(), zmq::send_flags::sndmore);
     zmqPublisher_.send(msgbody, zmq::send_flags::none);
-    // if(!publisher_->send(msgBuffer.data(), msgBuffer.size()))
-    //     log_.errorStream() << topic << " publish failed";
 }
 
 int16_t Poller::getS16(const uint16_t addr, const uint16_t beginAddr, const vector<uint16_t>& frameRegisters)

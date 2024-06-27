@@ -19,13 +19,14 @@ StrategyXftg::StrategyXftg()
     : log_(ems::Log4cppWrapper::getLogger(0))
     , pcsControler_(make_shared<pcs::Controler>())
     , bauControler_(make_shared<bau::Controler>())
+    , subscriber_(miscellaneous::createZmqSocket(zmq::socket_type::sub))
 {
     loadWeekPlanInfo();
     loadDayPlanDurationInfo();
     loadDayPlanProtectInfo();
 
-    subscriber_ = make_shared<ZmqSubscribe>("tcp://localhost:9100");
-    subscriber_->subscribe("ExecStrategy");
+    subscriber_.set(zmq::sockopt::subscribe, "ExecStrategy");
+    subscriber_.connect("tcp://localhost:9100");
 }
 
 StrategyXftg::~StrategyXftg()
@@ -124,18 +125,21 @@ void StrategyXftg::start()
     loopThread_ = thread([&]{
     while(true)
     {
-        // const int activeEventNum = zmq::poll(&item, 1, std::chrono::seconds(3));
-        // if(activeEventNum <= 0) continue;
+        zmq::message_t topic;
+        zmq::message_t subtitle;
+        zmq::message_t body;
+        (void)subscriber_.recv(topic);
+        (void)subscriber_.recv(subtitle);
+        (void)subscriber_.recv(body);
 
-        string rBuffer;
-        subscriber_->recv(rBuffer);
+        // string rBuffer;
+        // subscriber_->recv(rBuffer);
 
         // 这里需要解析数据;
-        const string topic{ "ExecStrategy" };
+        // const string topic{ "ExecStrategy" };
 
         ExecuteParams params;
-        const bool unserializedResult = msgpackWrapper::unpack(rBuffer.data() + topic.size(), 
-                                                                rBuffer.size() - topic.size(), params);
+        const bool unserializedResult = msgpackWrapper::unpack(body.data(), body.size(), params);
         BOOST_ASSERT(unserializedResult);
 
         doWork(params);

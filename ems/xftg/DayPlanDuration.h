@@ -17,14 +17,13 @@ class DayPlanDuration
 public:
     using Record = tuple<string, string, string, string, string, string>;
     DayPlanDuration();
-    vector<byte> respondCallbackDelete(std::shared_ptr<StationInfo> stationInfo, const vector<byte>& reqmsg) const;
-    vector<byte> respondCallbackPut(std::shared_ptr<StationInfo> stationInfo, const vector<byte>& reqmsg) const;
-    vector<byte> respondCallbackPost(std::shared_ptr<StationInfo> stationInfo, const vector<byte>& reqmsg) const;
+    void respondCallback(std::shared_ptr<StationInfo> stationInfo, zmq::socket_t& router,
+                        const vector<byte>& identity, const vector<byte>& subtitle, const vector<byte>& body) const;
     static vector<Record> getRecord(const string& name);
     static std::optional<map<string, vector<Record>>> getAllRecord();
+    vector<byte> identity();
 private:
     void registerHttpInterfaces();// 数据发布
-    optional<string> request(const string& requestMessage);
     void requestCallbackPost(const httplib::Request &req, httplib::Response &res);
     void requestCallbackDelete(const httplib::Request &req, httplib::Response &res);
     void requestCallbackPut(const httplib::Request &req, httplib::Response &res);
@@ -33,8 +32,12 @@ private:
     
     std::string createTable();
     bool insertIntoDefaultRecord();
-    
-    std::unique_ptr<ZmqRequest> requester_;
+
+    zmq::socket_t dealer_;
+    const string identity_;
+    const string deleteSubtitle_;
+    const string putSubtitle_;
+    const string postSubtitle_;
 };
 
 }//xftg

@@ -13,7 +13,7 @@ inline msgpack::sbuffer pack(T&& v)
 {
     msgpack::sbuffer sbuf;
     msgpack::pack(sbuf, std::forward<T>(v));
-    return std::move(sbuf);
+    return sbuf;
 }
 
 template <typename T>

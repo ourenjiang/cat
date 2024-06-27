@@ -5,19 +5,28 @@
 #include "sqlite_modern_cpp.h"
 #include <regex>
 #include "ems/station/UserManager.h"
-#include "ems/station/AuthException.h"
 #include "ems/station/OperationRecord.h"
 #include "utils/Miscellaneous.h"
 #include "utils/MsgpackWrapper_src.hpp"
+#include "utils/AuthException.h"
 
 using namespace ems::xftg;
 
 WeekPlan::WeekPlan()
+    : identity_("XftgWeekPlan")
+    , dealer_(miscellaneous::createZmqSocket(zmq::socket_type::dealer))
 {
     createTable();
     insertIntoDefaultRecord();
     registerHttpInterfaces();
-    requester_ = make_unique<ZmqRequest>("tcp://127.0.0.1:6200");
+    dealer_.set(zmq::sockopt::routing_id, identity_);
+    dealer_.connect("tcp://127.0.0.1:6200");
+}
+
+vector<byte> WeekPlan::identity()
+{
+    const auto beginItr = reinterpret_cast<const byte*>(identity_.data());
+    return { beginItr, beginItr + identity_.size() };
 }
 
 void WeekPlan::registerHttpInterfaces()
@@ -31,25 +40,10 @@ void WeekPlan::registerHttpInterfaces()
     serv.Put("/strategy/xftg/weekPlan", httplib::Server::Handler(bind(&WeekPlan::requestCallbackPut, this, _1, _2)));
 }
 
-vector<byte> WeekPlan::respondCallbackDelete(std::shared_ptr<StationInfo> stationInfo, const vector<byte>& msgbody) const
+void WeekPlan::respondCallback(std::shared_ptr<StationInfo> stationInfo, zmq::socket_t& router,
+                        const vector<byte>& identity, const vector<byte>& subtitle, const vector<byte>& body) const
 {
-    // 这里需要从数据库重新加载这部分记录.
-
-    return miscellaneous::convertStringToBytes("success");
-}
-
-vector<byte> WeekPlan::respondCallbackPost(std::shared_ptr<StationInfo> stationInfo, const vector<byte>& msgbody) const
-{
-    // 这里需要从数据库重新加载这部分记录.
-
-    return miscellaneous::convertStringToBytes("success");
-}
-
-vector<byte> WeekPlan::respondCallbackPut(std::shared_ptr<StationInfo> stationInfo, const vector<byte>& msgbody) const
-{
-    // 这里需要从数据库重新加载这部分记录.
-
-    return miscellaneous::convertStringToBytes("success");
+    // 返回结果
 }
 
 void WeekPlan::requestCallbackPost(const httplib::Request &req, httplib::Response &res)
@@ -93,26 +87,30 @@ try
     const string filename{ dbPath + "/Xftg.sqlite" };
     sqlite::database XftgDb(filename);
 
-    // 检查记录是否已存在
-    int recordCount{ 0 };
-    XftgDb << "SELECT COUNT(*) FROM XFTG_WEEK_PLAN WHERE NAME = ?;"
-        << weekPlanName >> recordCount;
-    if(recordCount > 0)
-        throw AuthException("记录已存在", auth["username"].asString());
-    
-    // 检查DayPlan记录是否已存在
-    int dayPlanDurationRecordCount{ 0 };
-    XftgDb << "SELECT COUNT(*) FROM XFTG_DAYPLAN_DURATION WHERE NAME = ?;"
-        << dayPlanDurationName >> dayPlanDurationRecordCount;
-    if(dayPlanDurationRecordCount == 0)
-        throw AuthException("日计划不存在", auth["username"].asString());
-    
-    // 检查DayPlan记录是否已存在
-    int dayPlanProtectRecordCount{ 0 };
-    XftgDb << "SELECT COUNT(*) FROM XFTG_DAYPLAN_PROTECT WHERE NAME = ?;"
-        << dayPlanDurationName >> dayPlanProtectRecordCount;
-    if(dayPlanProtectRecordCount == 0)
-        throw AuthException("保护计划不存在", auth["username"].asString());
+    {
+        // 检查记录是否已存在
+        int recordCount{ 0 };
+        XftgDb << "SELECT COUNT(*) FROM XFTG_WEEK_PLAN WHERE NAME = ?;"
+            << weekPlanName >> recordCount;
+        if(recordCount > 0)
+            throw AuthException("记录已存在", auth["username"].asString());
+    }
+    {
+        // 检查DayPlan记录是否已存在
+        int recordCount{ 0 };
+        XftgDb << "SELECT COUNT(*) FROM XFTG_DAYPLAN_DURATION WHERE NAME = ?;"
+            << dayPlanDurationName >> recordCount;
+        if(recordCount == 0)
+            throw AuthException("日计划不存在", auth["username"].asString());
+    }
+    {
+        // 检查DayPlan记录是否已存在
+        int recordCount{ 0 };
+        XftgDb << "SELECT COUNT(*) FROM XFTG_DAYPLAN_PROTECT WHERE NAME = ?;"
+            << dayPlanProtectName >> recordCount;
+        if(recordCount == 0)
+            throw AuthException("保护计划不存在", auth["username"].asString());
+    }
 
     XftgDb << "INSERT INTO XFTG_WEEK_PLAN ("
                 "NAME, "
@@ -127,33 +125,8 @@ try
             << dayWhiteList << validDateBegin << validDateEnd
             << priority << bindSystem;
 
-    // 准备请求消息
-    string publishContent;
-    const string topic = miscellaneous::createFixedSizeString("XftgWeekPlanPost");
-    std::copy(topic.data(), topic.data() + topic.size(), std::back_inserter(publishContent));
-
-    // 发送消息
-    const vector<byte> sendmsg(reinterpret_cast<byte*>(publishContent.data()),
-                                reinterpret_cast<byte*>(publishContent.data()) + publishContent.size());
-    const bool sendResult = requester_->send(sendmsg);
-    if(!sendResult) throw std::runtime_error("zmq send err");
-
-    // 接收消息
-    const auto recvResult = requester_->recv();
-    if(!recvResult) throw std::runtime_error("zmq recv failed");
-    const auto recvmsg = recvResult.value();
-
-    // 先解析标准的响应消息
-    pair<bool, vector<byte>> respondMsg;
-    const bool unpackMsgResult = msgpackWrapper::unpack(recvmsg.data(), recvmsg.size(), respondMsg);
-    BOOST_ASSERT(unpackMsgResult);
-    const auto& [returnStatus, returnContent] = respondMsg;
-    if(!returnStatus){
-        // 再解析自定义的响应内容
-        const string errmsg(reinterpret_cast<const char*>(returnContent.data()),
-                                    reinterpret_cast<const char*>(returnContent.data()) + returnContent.size());
-        throw std::runtime_error(errmsg);
-    }
+    dealer_.send(zmq::message_t(postSubtitle_), zmq::send_flags::sndmore);
+    dealer_.send(zmq::message_t(), zmq::send_flags::none);
 
     // 保存'成功'操作记录
     const string status = "success";
@@ -306,34 +279,8 @@ try
     // 执行删除
     XftgDb << "DELETE FROM XFTG_WEEK_PLAN WHERE NAME = ?;" << weekPlanName;
 
-    // 准备请求消息
-    string publishContent;
-    const string topic = miscellaneous::createFixedSizeString("XftgWeekPlanDelete");
-    std::copy(topic.data(), topic.data() + topic.size(), std::back_inserter(publishContent));
-
-    // 发送消息
-    const vector<byte> sendmsg(reinterpret_cast<byte*>(publishContent.data()),
-                                reinterpret_cast<byte*>(publishContent.data()) + publishContent.size());
-    const bool sendResult = requester_->send(sendmsg);
-    if(!sendResult) throw std::runtime_error("zmq send err");
-
-    // 接收消息
-    const auto recvResult = requester_->recv();
-    if(!recvResult) throw std::runtime_error("zmq recv failed");
-    const auto recvmsg = recvResult.value();
-
-    // 先解析标准的响应消息
-    pair<bool, vector<byte>> standardRespondMsg;
-    const bool standardUnpackResult = msgpackWrapper::unpack(recvmsg.data(), recvmsg.size(), standardRespondMsg);
-    BOOST_ASSERT(standardUnpackResult);
-    const auto& [returnStatus, returnContent] = standardRespondMsg;
-
-    // 再解析自定义的响应内容
-    if(!returnStatus){
-        const string errmsg(reinterpret_cast<const char*>(returnContent.data()),
-                            reinterpret_cast<const char*>(returnContent.data()) + returnContent.size());
-        throw std::runtime_error(errmsg);
-    }
+    dealer_.send(zmq::message_t(deleteSubtitle_), zmq::send_flags::sndmore);
+    dealer_.send(zmq::message_t(), zmq::send_flags::none);
 
     Json::Value respondContent;
     respondContent["errcode"] = 0;
@@ -392,12 +339,30 @@ try
     const string filename{ dbPath + "/Xftg.sqlite" };
     sqlite::database XftgDb(filename);
 
-    // 查询记录是否存在
-    int recordCount{0};
-    XftgDb << "SELECT COUNT(*) FROM XFTG_WEEK_PLAN WHERE NAME = ?;"
-        << weekPlanName >> recordCount;
-    if(recordCount == 0)
-        throw AuthException("月计划不存在", usernameAuth);
+    {
+        // 查询周计划记录是否存在
+        int recordCount{0};
+        XftgDb << "SELECT COUNT(*) FROM XFTG_WEEK_PLAN WHERE NAME = ?;"
+            << weekPlanName >> recordCount;
+        if(recordCount == 0)
+            throw AuthException("月计划不存在", usernameAuth);
+    }
+    {
+        // 查询日计划记录是否存在
+        int recordCount{0};
+        XftgDb << "SELECT COUNT(*) FROM XFTG_DAYPLAN_DURATION WHERE NAME = ?;"
+            << dayPlanDurationName >> recordCount;
+        if(recordCount == 0)
+            throw AuthException("日计划不存在", usernameAuth);
+    }
+    {
+        // 查询保护参数记录是否存在
+        int recordCount{0};
+        XftgDb << "SELECT COUNT(*) FROM XFTG_DAYPLAN_PROTECT WHERE NAME = ?;"
+            << dayPlanProtectName >> recordCount;
+        if(recordCount == 0)
+            throw AuthException("保护参数不存在", usernameAuth);
+    }
 
     XftgDb << "UPDATE XFTG_WEEK_PLAN SET "
                             "DAYPLAN_DURATION_NAME = ?, "
@@ -411,33 +376,8 @@ try
                         << priority << bindSystem
                         << weekPlanName;
 
-    // 准备请求消息
-    string publishContent;
-    const string topic = miscellaneous::createFixedSizeString("XftgWeekPlanPut");
-    std::copy(topic.data(), topic.data() + topic.size(), std::back_inserter(publishContent));
-
-    // 发送消息
-    const vector<byte> sendmsg(reinterpret_cast<byte*>(publishContent.data()),
-                                reinterpret_cast<byte*>(publishContent.data()) + publishContent.size());
-    const bool sendResult = requester_->send(sendmsg);
-    if(!sendResult) throw std::runtime_error("zmq send err");
-
-    // 接收消息
-    const auto recvResult = requester_->recv();
-    if(!recvResult) throw std::runtime_error("zmq recv failed");
-    const auto recvmsg = recvResult.value();
-
-    // 先解析标准的响应消息
-    pair<bool, vector<byte>> respondMsg;
-    const bool unpackMsgResult = msgpackWrapper::unpack(recvmsg.data(), recvmsg.size(), respondMsg);
-    BOOST_ASSERT(unpackMsgResult);
-    const auto& [returnStatus, returnContent] = respondMsg;
-    if(!returnStatus){
-        // 再解析自定义的响应内容
-        const string errmsg(reinterpret_cast<const char*>(returnContent.data()),
-                                    reinterpret_cast<const char*>(returnContent.data()) + returnContent.size());
-        throw std::runtime_error(errmsg);
-    }
+    dealer_.send(zmq::message_t(putSubtitle_), zmq::send_flags::sndmore);
+    dealer_.send(zmq::message_t(), zmq::send_flags::none);
 
     // 保存'成功'操作记录
     const string status { "success" };
@@ -460,7 +400,13 @@ catch(const std::exception& e){
     const string type{ "参数设置" };
     const string timestamp = miscellaneous::getCurrentTimestamp();
     const string username = miscellaneous::getCurrentTimestamp();
-    // OperationRecord::insertRecord(status, content, type, timestamp, username);
+    // OperationRecord::insertRecord("失败", "修改削峰填俗-周计划 ", "用户管理", usernameAuth);
+
+    //记录错误操作日志
+    auto authException = dynamic_cast<const AuthException*>(&e);
+    if(authException){
+        OperationRecord::insertRecord("失败", authException->what(), "参数设置", authException->username());
+    }
 
     // 失败响应
     Json::Value respondmsg;

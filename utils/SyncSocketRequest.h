@@ -10,17 +10,22 @@ namespace ems
 using namespace std;
 using boost::asio::ip::tcp;
 
+/*
+再添加一个连接状态检查并自动重连的内部线程.
+*/
+
 class SyncSocketRequest
 {
 public:
     SyncSocketRequest(const string ip, const string port);
     ~SyncSocketRequest();
 
-    void asyncConnect();
     bool asyncWrite(const std::string& data);
     bool syncReadConditionVariable();
     std::string gerRecvBuffer(){ return recvBuffer_; }
 private:
+    void asyncConnect();
+    
     void handle_read(const boost::system::error_code& error, std::size_t bytes_transferred);
     void handle_write(const boost::system::error_code& error, std::size_t bytes_transferred);
 

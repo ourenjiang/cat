@@ -12,12 +12,15 @@ class Profit
 {
 public:
     Profit();
-    vector<byte> respondCallback(std::shared_ptr<StationInfo> stationInfo, const vector<byte>& reqmsg);
+    void respondCallback(std::shared_ptr<StationInfo> stationInfo, zmq::socket_t& router,
+                        const vector<byte>& identity, const vector<byte>& subtitle, const vector<byte>& body);
+    vector<byte> identity();
 private:
     void registerAllInterfaces();
     void requestCallback(const httplib::Request &req, httplib::Response &res);
 
     log4cpp::Category& log_;
-    std::unique_ptr<ZmqRequest> requester_;
+    const string identity_;
+    zmq::socket_t dealer_;
 };
 }//namespace interface

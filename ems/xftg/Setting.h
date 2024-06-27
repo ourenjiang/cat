@@ -13,8 +13,10 @@ class Setting
 {
 public:
     Setting();
-    vector<byte> respondPutCallback(std::shared_ptr<StationInfo> stationInfo, const vector<byte>& reqmsg) const;
+    vector<byte> respondCallback(std::shared_ptr<StationInfo> stationInfo, zmq::socket_t& router,
+                        const vector<byte>& identity, const vector<byte>& subtitle, const vector<byte>& body) const;
     static optional<string> getRecord(const string& branchIndex);
+    vector<byte> identity();
 private:
     void registerHttpInterfaces();// 数据发布
     void requestCallbackGet(const httplib::Request &req, httplib::Response &res);
@@ -23,7 +25,8 @@ private:
     string createTable();
     void insertIntoDefaultRecord();
 
-    std::unique_ptr<ZmqRequest> requester_;
+    zmq::socket_t dealer_;
+    const string identity_;
 };
 
 }//namespace xftg
