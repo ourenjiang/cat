@@ -28,7 +28,6 @@ private:
     bool needOnByPcsValidPower();// 因长期有效的功率值而开关
 
     log4cpp::Category& log_;
-    zmq::context_t zmqContext_;
     zmq::socket_t zmqDealer_;
 };
 }//namespace pcs

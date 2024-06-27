@@ -9,7 +9,7 @@ using namespace ems::pcs;
 
 Controler::Controler()
     : log_(ems::Log4cppWrapper::getLogger(0))
-    , zmqDealer_(zmqContext_, zmq::socket_type::dealer)
+    , zmqDealer_(miscellaneous::createZmqSocket(zmq::socket_type::dealer))
 {
     {
         auto& cfgRoot = YamlcppWrapper::getRoot();

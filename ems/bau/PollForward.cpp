@@ -10,7 +10,7 @@ using namespace ems::bau;
 
 PollForward::PollForward()
     : log_(ems::Log4cppWrapper::getLogger(1))
-    , zmqRouter_(zmqContext_, zmq::socket_type::router)
+    , zmqRouter_(miscellaneous::createZmqSocket(zmq::socket_type::router))
 {
     // 启动代理服务
     auto& cfgRoot = YamlcppWrapper::getRoot();

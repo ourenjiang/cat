@@ -22,9 +22,7 @@ public:
 private:
     optional<vector<byte>> pollModbusSlave(const zmq::message_t& msg);
     log4cpp::Category& log_;
-    zmq::context_t zmqContext_;
     zmq::socket_t zmqRouter_;
-    // std::shared_ptr<ZmqRespond> zmqRespond_;
     std::shared_ptr<SyncSocketRequest> syncSocket_;
     std::thread loopThread_;
 };
