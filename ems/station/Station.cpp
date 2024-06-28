@@ -46,10 +46,10 @@ void Station::initBau(bau::BauInfo& bauInfo, const int branchIndex)
     pollForward.start();
 
     //  init bau poller
-    auto& bauPoller = bauInfo.bauPoller;
-    bauPoller.setBranchIndex(branchIndex);
-    bauPoller.initPublishInterface("tcp://localhost:", 6700);
-    bauPoller.start();
+    // auto& bauPoller = bauInfo.bauPoller;
+    // bauPoller.setBranchIndex(branchIndex);
+    // bauPoller.initPublishInterface("tcp://localhost:", 6700);
+    // bauPoller.start();
 }
 
 void Station::initPcs(pcs::PcsInfo& pcsInfo, const int branchIndex)
@@ -126,24 +126,24 @@ void Station::initBauStruct(const int branchIndex, const vector<int>& bcuIndexLi
 
     if(!bauInfo.initFlag)
     {
-        auto& bauPoller = bauInfo.bauPoller;
-        uint16_t bauPublishPort = bauPoller.getPublishPort();
+        // auto& bauPoller = bauInfo.bauPoller;
+        // uint16_t bauPublishPort = bauPoller.getPublishPort();
 
-        // init bcu poller
-        auto& bcuPoller = bauInfo.bcuPoller;
-        bcuPoller.subscribeBauStatus("tcp://localhost:" + to_string(bauPublishPort), "BauSummary");
-        bcuPoller.setBranchIndex(branchIndex);
-        bcuPoller.initPublishInterface("tcp://localhost:" + to_string(bauPublishPort + 1));
-        bcuPoller.start();
+        // // init bcu poller
+        // auto& bcuPoller = bauInfo.bcuPoller;
+        // bcuPoller.subscribeBauStatus("tcp://localhost:" + to_string(bauPublishPort), "BauSummary");
+        // bcuPoller.setBranchIndex(branchIndex);
+        // bcuPoller.initPublishInterface("tcp://localhost:" + to_string(bauPublishPort + 1));
+        // bcuPoller.start();
 
-        // init bmu poller
-        auto& bmuPoller = bauInfo.bmuPoller;
-        bmuPoller.subscribeBauStatus("tcp://localhost:" + to_string(bauPublishPort), "BauSummary");
-        bmuPoller.setBranchIndex(branchIndex);
-        bmuPoller.initPublishInterface("tcp://localhost:" + to_string(bauPublishPort + 2));
-        bmuPoller.start();
+        // // init bmu poller
+        // auto& bmuPoller = bauInfo.bmuPoller;
+        // bmuPoller.subscribeBauStatus("tcp://localhost:" + to_string(bauPublishPort), "BauSummary");
+        // bmuPoller.setBranchIndex(branchIndex);
+        // bmuPoller.initPublishInterface("tcp://localhost:" + to_string(bauPublishPort + 2));
+        // bmuPoller.start();
 
-        bauInfo.initFlag = true;// 置为已初始化状态
+        // bauInfo.initFlag = true;// 置为已初始化状态
     }
 }
 
@@ -313,8 +313,10 @@ void Station::parseBauTopicBauStatus(const vector<byte>& body)
     bingjiStatusSummaryCache = bingjiStatusSummaryNew;// 更新缓存
     bauInfo.onlineFlag = true;// 更新设备在线状态
     // 更新三级告警状态
-    updateBauWarningAndFaultMap(bauInfo, bauStatusSummaryCache.warnCountL1, bauStatusSummaryCache.warnCountL2,
-                                bauStatusSummaryCache.warnCountL3, bauStatusSummaryCache.faultStatus);
+    // updateBauWarningAndFaultMap(bauInfo, bauStatusSummaryCache.warnCountL1, bauStatusSummaryCache.warnCountL2,
+    //                             bauStatusSummaryCache.warnCountL3, bauStatusSummaryCache.faultStatus);
+    updateBauWarningAndFaultMap(bauInfo, bauStatusSummaryCache.protectStatusL1, bauStatusSummaryCache.protectStatusL2,
+                                bauStatusSummaryCache.protectStatusL3, bauStatusSummaryCache.faultStatus);
     initBauStruct(branchIndex, bauStatusSummaryCache.bcuIndexListOnline, bauStatusSummaryCache.bcuSize);// 刷新BAU结构
 
     {
@@ -611,9 +613,12 @@ try
         auto& bcuInfo = bcuList[bcuIndex];
         bcuInfo.base = summary;
         // 更新告警状态
+        // updateBcuWarningAndFaultMap(bcuInfo,
+        //                             summary.warnCountL1, summary.warnCountL2, 
+        //                             summary.warnCountL3, summary.faultStatus);
         updateBcuWarningAndFaultMap(bcuInfo,
-                                    summary.warnCountL1, summary.warnCountL2, 
-                                    summary.warnCountL3, summary.faultStatus);
+                                    summary.protectStatusL1, summary.protectStatusL2, 
+                                    summary.protectStatusL3, summary.faultStatus);
         // 更新设备在线状态
         bcuInfo.onlineFlag = true;
     }
