@@ -13,35 +13,37 @@ using namespace boost;
 using namespace ems;
 using namespace ems::bau;
 
-BauPoller::BauPoller()
+BauPoller::BauPoller(const string& pollAddress, const int64_t timeoutMs, const string& publishAddress)
     : log_(Log4cppWrapper::getLogger(3))
-    , timer_(io_service_, asio::chrono::milliseconds(500))
     , zmqDealer_(miscellaneous::createZmqSocket(zmq::socket_type::dealer))
+    , timer_(std::bind(&BauPoller::onTimeout, this), timeoutMs)
     , zmqPublisher_(miscellaneous::createZmqSocket(zmq::socket_type::pub))
 {
-    {
-        auto& cfgRoot = YamlcppWrapper::getRoot();
-        const auto& collectors = cfgRoot["collector"];
-        auto resultLoad = std::find_if(collectors.begin(), collectors.end(), [](const YAML::Node& item){
-            return item["name"].as<string>() == "BAU";
-        });
-        BOOST_ASSERT(resultLoad != collectors.end());
-        BOOST_ASSERT((*resultLoad)["load"].as<bool>());
+    zmqDealer_.connect(pollAddress);
+    zmqPublisher_.bind(publishAddress);
+    
+    // {
+    //     auto& cfgRoot = YamlcppWrapper::getRoot();
+    //     const auto& collectors = cfgRoot["collector"];
+    //     auto resultLoad = std::find_if(collectors.begin(), collectors.end(), [](const YAML::Node& item){
+    //         return item["name"].as<string>() == "BAU";
+    //     });
+    //     BOOST_ASSERT(resultLoad != collectors.end());
+    //     BOOST_ASSERT((*resultLoad)["load"].as<bool>());
 
-        const string proxyAddress = (*resultLoad)["master"]["address"].as<string>();
-        zmqDealer_.connect(proxyAddress);
-    }
+    //     const string proxyAddress = (*resultLoad)["master"]["address"].as<string>();
+    //     zmqDealer_.connect(proxyAddress);
+    // }
 }
 
-BauPoller::BauPoller(BauPoller&& other)
-    : log_(other.log_)
-    , timer_(std::move(other.timer_))
-{
-}
+// BauPoller::BauPoller(BauPoller&& other)
+//     : log_(other.log_)
+//     , timer_(std::move(other.timer_))
+// {
+// }
 
 void BauPoller::initPublishInterface(const std::string& ip, const uint16_t port)
 {
-    // 保存
     publishIp_ = ip ;
     publishPort_ = port;
 
@@ -51,18 +53,18 @@ void BauPoller::initPublishInterface(const std::string& ip, const uint16_t port)
 
 BauPoller::~BauPoller()
 {
-    if(loopThread_.joinable()) loopThread_.join();
 }
 
 void BauPoller::start()
 {
-    loopThread_ = thread([this]{
-        timer_.async_wait(bind(&BauPoller::onTimeout, this, placeholders::_1));
-        io_service_.run();// blocking
-    });
+    // loopThread_ = thread([this]{
+    //     timer_.async_wait(bind(&BauPoller::onTimeout, this, placeholders::_1));
+    //     io_service_.run();// blocking
+    // });
+    timer_.start();
 }
 
-void BauPoller::onTimeout(const system::error_code &error)
+void BauPoller::onTimeout()
 {
     auto bingjiStatusSummary = doFrameBingjiStatus();
     auto bauStatusSummary = doFrameBauStatus();
@@ -70,11 +72,8 @@ void BauPoller::onTimeout(const system::error_code &error)
     if(bingjiStatusSummary.has_value() && bauStatusSummary.has_value()){
         const string topic{ "BauSummary" };// 主题名称
         this->publish(topic, branchIndex_, bingjiStatusSummary.value(), bauStatusSummary.value());
+        cout << "publish..." << endl;
     }
-
-    // 重新注册定时器
-    timer_.expires_from_now(asio::chrono::milliseconds(500));
-    timer_.async_wait(bind(&BauPoller::onTimeout, this, placeholders::_1));
 }
 
 std::optional<vector<uint8_t>> BauPoller::pollMessage(const vector<uint8_t>& reqmsg)
@@ -252,7 +251,8 @@ BauStatusSummary BauPoller::createBauStatusSummary(const vector<uint16_t>& frame
         const double rate{ 0.001 };//mv
         summary.cellvoltMax = value * rate;
     }
-    summary.cellvoltMaxAddr = getU16(0x032E, 0x0300, frameRegisters);
+    // summary.cellvoltMaxAddr = getU16(0x032E, 0x0300, frameRegisters);
+    summary.cellvoltMaxAddr = getU16(0x032C, 0x0300, frameRegisters);
     {
         const uint16_t value{ getU16(0x032F, 0x0300, frameRegisters) };
         const double rate{ 0.001 };//mv
