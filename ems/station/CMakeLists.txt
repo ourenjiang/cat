@@ -1,23 +1,15 @@
-add_executable(station
-Poller.cpp
-HttpServer.cpp
-UserManager.cpp
-MainWiringDiagram.cpp
-StorageEnergySystem.cpp
-PublicInfo.cpp
-HistoryWarning.cpp
-RealtimeWarning.cpp
-OperationRecord.cpp
-DeviceTreelist.cpp
+set(station_SRCS
 Station.cpp
-main.cpp
+# StationBuilder.cpp
 )
 
+add_library(station ${station_SRCS})
+
+set_target_properties(station PROPERTIES POSITION_INDEPENDENT_CODE ON)
 target_link_libraries(station
-profit
+bau
+pcs
 xftg
-solar
-boost_timer.a
 )
 
 # add_subdirectory(tests)

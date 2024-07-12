@@ -1,6 +1,9 @@
-add_executable(warning_test
-warning_test.cpp
+add_executable(station_builder_test StationBuilderTest.cpp)
+target_link_libraries(station_builder_test
+station
 )
-target_link_libraries(warning_test
+
+add_executable(station2_test Station2Test.cpp)
+target_link_libraries(station2_test
 station
 )

@@ -30,3 +30,21 @@ add_executable(dealerTest2 DealerTest2.cpp)
 target_link_libraries(dealerTest2
 PRIVATE cat_utils
 )
+
+####################################################
+add_executable(boostTimerTest BoostTimerTest.cpp)
+target_link_libraries(boostTimerTest
+PRIVATE cat_utils
+)
+
+####################################################
+add_executable(zmqNodeTest ZmqNodeTest.cpp)
+target_link_libraries(zmqNodeTest
+PRIVATE cat_utils
+)
+
+####################################################
+add_executable(syncRespondTest SyncRespondTest.cpp)
+target_link_libraries(syncRespondTest
+PRIVATE cat_utils
+)

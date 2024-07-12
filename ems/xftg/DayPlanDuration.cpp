@@ -5,62 +5,171 @@
 #include "json/json.h"
 #include "utils/MsgpackWrapper_src.hpp"
 #include "utils/Miscellaneous.h"
-#include "ems/station/UserManager.h"
+#include "ems/interface/UserManager.h"
 #include "utils/AuthException.h"
+#include "ems/base/UserManager.h"
+#include "utils/datetime.h"
+#include "utils/jsonWrapper.h"
+#include "utils/StreamWrapper.h"
 
+using namespace ems;
 using namespace ems::xftg;
 
-DayPlanDuration::DayPlanDuration()
-    : identity_("XftgDayPlanDuration")
-    , dealer_(miscellaneous::createZmqSocket(zmq::socket_type::dealer))
-{
-    createTable();
-    insertIntoDefaultRecord();
-    registerHttpInterfaces();
-    dealer_.set(zmq::sockopt::routing_id, identity_);
-    dealer_.connect("tcp://127.0.0.1:6200");
-}
-
-vector<byte> DayPlanDuration::identity()
-{
-    const auto beginItr = reinterpret_cast<const byte*>(identity_.data());
-    return { beginItr, beginItr + identity_.size() };
-}
-
-void DayPlanDuration::registerHttpInterfaces()
-{
-    using namespace std::placeholders;
-    auto& serv = utils::getHttpServerSingleton();
-    serv.Post("/strategy/xftg/dayPlan", httplib::Server::Handler(bind(&DayPlanDuration::requestCallbackPost, this, _1, _2)));
-    serv.Get("/strategy/xftg/dayPlan", httplib::Server::Handler(bind(&DayPlanDuration::requestCallbackGet, this, _1, _2)));
-    serv.Get("/strategy/xftg/dayPlan/namelist", httplib::Server::Handler(bind(&DayPlanDuration::requestCallbackGetNameList, this, _1, _2)));
-    serv.Delete("/strategy/xftg/dayPlan", httplib::Server::Handler(bind(&DayPlanDuration::requestCallbackDelete, this, _1, _2)));
-    serv.Put("/strategy/xftg/dayPlan", httplib::Server::Handler(bind(&DayPlanDuration::requestCallbackPut, this, _1, _2)));
-}
-
-void DayPlanDuration::requestCallbackPost(const httplib::Request &req, httplib::Response &res)
+void DayPlanDuration::createTable()
 {
 try
 {
-    const auto reqbody = miscellaneous::unserializedJson(req.body);
+    const string projectPath{ "/opt/paceic_ems_server/main" };
+    const string dbPath{ projectPath + "/db" };
+    BOOST_ASSERT(filesystem::is_directory(dbPath));
 
-    /* 鉴权 */
-    Json::Value auth;
-    if(!reqbody.isMember("auth"))
+    const string filename{ dbPath + "/Xftg.sqlite" };
+    sqlite::database XftgDb(filename);
+
+    XftgDb << "CREATE TABLE IF NOT EXISTS XFTG_DAYPLAN_DURATION("
+                            "NAME TEXT,"
+                            "DURATION_NAME TEXT,"
+                            "DURATION_BEGIN TEXT,"
+                            "DURATION_END TEXT,"
+                            "CONTROL_TYPE TEXT,"
+                            "TARGET_SOC TEXT, "
+                            "TARGET_POWER TEXT, "
+                            "PRIMARY KEY(NAME, DURATION_NAME))";
+}
+catch(const std::exception& e){
+    std::cerr << e.what() << '\n';
+}
+}
+
+void DayPlanDuration::insertIntoDefaultRecord()
+{
+try
+{
+    const string projectPath{ "/opt/paceic_ems_server/main" };
+    const string dbPath{ projectPath + "/db" };
+    BOOST_ASSERT(filesystem::is_directory(dbPath));
+
+    const string filename{ dbPath + "/Xftg.sqlite" };
+    sqlite::database XftgDb(filename);
+
+    // XftgDb << "DELETE FROM XFTG_DAYPLAN_DURATION;";// clear old records
+    int recordCount{0};
+    XftgDb << "SELECT COUNT(*) FROM XFTG_DAYPLAN_DURATION;" >> recordCount;
+    if(recordCount > 0) return;
+
+    /** 这里模拟两充一放的时段组合，共3条记录 */
+    {
+        XftgDb << "INSERT INTO XFTG_DAYPLAN_DURATION ("
+                    "NAME, DURATION_NAME, DURATION_BEGIN, DURATION_END, "
+                    "CONTROL_TYPE, TARGET_SOC, TARGET_POWER) VALUES (?, ?, ?, ?, ?, ?, ?);"
+                    << "dayPlanDuration1" << "duration1" << "00:00" << "08:00" << "charge" << "100%" << "10kW";
+        XftgDb << "INSERT INTO XFTG_DAYPLAN_DURATION ("
+                    "NAME, DURATION_NAME, DURATION_BEGIN, DURATION_END, "
+                    "CONTROL_TYPE, TARGET_SOC, TARGET_POWER) VALUES (?, ?, ?, ?, ?, ?, ?);"
+                    << "dayPlanDuration1" << "duration2" << "08:00" << "12:00" << "charge" << "100%" << "10kW";
+        XftgDb << "INSERT INTO XFTG_DAYPLAN_DURATION ("
+                    "NAME, DURATION_NAME, DURATION_BEGIN, DURATION_END, "
+                    "CONTROL_TYPE, TARGET_SOC, TARGET_POWER) VALUES (?, ?, ?, ?, ?, ?, ?);"
+                    << "dayPlanDuration1" << "duration3" << "12:00" << "~" << "charge" << "100%" << "10kW";
+    }
+
+    /** 这里模拟两充两放的时段组合，共4条记录 */
+    {
+        XftgDb << "INSERT INTO XFTG_DAYPLAN_DURATION ("
+                    "NAME, DURATION_NAME, DURATION_BEGIN, DURATION_END, "
+                    "CONTROL_TYPE, TARGET_SOC, TARGET_POWER) VALUES (?, ?, ?, ?, ?, ?, ?);"
+                    << "dayPlanDuration2" << "duration1" << "00:00" << "08:00" << "charge" << "100%" << "10kW";
+        XftgDb << "INSERT INTO XFTG_DAYPLAN_DURATION ("
+                    "NAME, DURATION_NAME, DURATION_BEGIN, DURATION_END, "
+                    "CONTROL_TYPE, TARGET_SOC, TARGET_POWER) VALUES (?, ?, ?, ?, ?, ?, ?);"
+                    << "dayPlanDuration2" << "duration2" << "08:00" << "12:00" << "discharge" << "100%" << "10kW";
+        XftgDb << "INSERT INTO XFTG_DAYPLAN_DURATION ("
+                    "NAME, DURATION_NAME, DURATION_BEGIN, DURATION_END, "
+                    "CONTROL_TYPE, TARGET_SOC, TARGET_POWER) VALUES (?, ?, ?, ?, ?, ?, ?);"
+                    << "dayPlanDuration2" << "duration3" << "12:00" << "19:00" << "charge" << "100%" << "10kW";
+        XftgDb << "INSERT INTO XFTG_DAYPLAN_DURATION ("
+                    "NAME, DURATION_NAME, DURATION_BEGIN, DURATION_END, "
+                    "CONTROL_TYPE, TARGET_SOC, TARGET_POWER) VALUES (?, ?, ?, ?, ?, ?, ?);"
+                    << "dayPlanDuration2" << "duration4" << "19:00" << "~" << "discharge" << "100%" << "10kW";
+    }
+}
+catch(const std::exception& e){
+    std::cerr << e.what() << '\n';
+}
+}
+
+pair<string, vector<DayPlanDuration::Record>> DayPlanDuration::parseRecordFromRequestBody(const Json::Value& root)
+{
+    if(!root.isMember("name") || root["name"].empty())// 存在且不为空
         throw std::runtime_error("request params err");
-    auth = reqbody["auth"];
-    if(!auth.isMember("username") || !auth.isMember("password"))
+    const string dayPlanName = root["name"].asString();
+
+    if(!root.isMember("durationList"))// 存在且不为空
         throw std::runtime_error("request params err");
-    if(!UserManager::doAuth(auth["username"].asString(), auth["password"].asString()))
-        throw std::runtime_error("auth failed");
+    const auto& durationList = root["durationList"]; 
+    if(!durationList.isArray() || durationList.empty())// 数组且不为空
+        throw std::runtime_error("request params err");
+    
+    vector<DayPlanDuration::Record> validRecords;
+    // 解析内容并做格式校验
+    for(const auto& item: durationList){
+        if(!item.isMember("durationName"))
+            throw std::runtime_error("request params err");
+        const string durationName = item["durationName"].asString();
+        
+        if(!item.isMember("durationBegin"))
+            throw std::runtime_error("request params err");
+        const string durationBegin = item["durationBegin"].asString();
+        if(!stream_wrapper::matchTimeHHMM(durationBegin))
+            throw std::runtime_error("request params err");
+        
+        if(!item.isMember("durationEnd"))
+            throw std::runtime_error("request params err");
+        const string durationEnd = item["durationEnd"].asString();
+        if(!stream_wrapper::matchTimeHHMM(durationEnd))
+            throw std::runtime_error("request params err");
+
+        if(!item.isMember("controlType"))
+            throw std::runtime_error("request params err");
+        const string controlType = item["controlType"].asString();
+        if(controlType != "charge" && controlType != "discharge" && controlType != "standby")
+            throw std::runtime_error("request params err");
+        
+        if(!item.isMember("targetSoc"))
+            throw std::runtime_error("request params err");
+        const string targetSoc = item["targetSoc"].asString();
+        if(!std::regex_match(targetSoc, std::regex(R"((\d+)%)")))
+            throw std::runtime_error("request params err");
+        
+        if(!item.isMember("targetPower"))
+            throw std::runtime_error("request params err");
+        const string targetPower = item["targetPower"].asString();
+        if(!std::regex_match(targetPower, std::regex(R"((\d+)kW)")))
+            throw std::runtime_error("request params err");
+        validRecords.emplace_back(durationName,
+            durationBegin, durationEnd, controlType, targetSoc, targetPower);
+    }
+    return { dayPlanName, validRecords };
+}
+
+void DayPlanDuration::notifyStationReload(shared_ptr<zmq::socket_t> stationDealer)
+{
+    stationDealer->send(zmq::message_t(string("Command")), zmq::send_flags::sndmore);
+    stationDealer->send(zmq::message_t(string("Branch0")), zmq::send_flags::sndmore);
+    stationDealer->send(zmq::message_t(string("Strategy")), zmq::send_flags::sndmore);
+    stationDealer->send(zmq::message_t(string("Xftg")), zmq::send_flags::sndmore);
+    stationDealer->send(zmq::message_t(string("DayPlanDuration")), zmq::send_flags::none);
+}
+
+void DayPlanDuration::requestCallbackPost(const httplib::Request &req, httplib::Response &res, shared_ptr<zmq::socket_t> stationDealer)
+{
+try
+{
+    const auto reqbody = json_wrapper::deserialize(req.body);
+    const auto usernameAuth = base::UserManager::doAuth(reqbody);
 
     /** 解析业务参数 */
-    if(!reqbody.isMember("name") || !reqbody.isMember("durationList"))
-        throw std::runtime_error("request params err");
-    const auto& durationList = reqbody["durationList"];
-    if(durationList.empty() || !durationList.isArray())
-        throw std::runtime_error("request params err");
-    const string dayPlanName = reqbody["name"].asString();
+    const auto& [dayPlanName, durationList] = parseRecordFromRequestBody(reqbody);
 
     // 打开数据库
     const string projectPath{ "/opt/paceic_ems_server/main" };
@@ -72,42 +181,24 @@ try
 
     // 检查记录是否已存在
     int recordCount{ 0 };
-    XftgDb << "SELECT COUNT(*) FROM XFTG_DAYPLAN_DURATION WHERE NAME = ?;"
-        << dayPlanName >> recordCount;
-    if(recordCount > 0)
-        throw AuthException("记录已存在", auth["username"].asString());
+    XftgDb << "SELECT COUNT(*) FROM XFTG_DAYPLAN_DURATION WHERE NAME = ?;" << dayPlanName >> recordCount;
+    if(recordCount > 0) throw AuthException("记录已存在", usernameAuth);
 
-    for(const auto& item: durationList){
-
-        if(!item.isMember("durationName")
-            || !item.isMember("durationBegin")
-            || !item.isMember("durationEnd")
-            || !item.isMember("controlType")
-            || !item.isMember("targetSoc")
-            || !item.isMember("targetPower")){
-                throw std::runtime_error("request params err");
-            }
-        
+    for(const auto& [durationName, durationBegin, durationEnd, controlType, targetSoc, targetPower]: durationList){
         XftgDb << "INSERT INTO XFTG_DAYPLAN_DURATION ("
-                    "NAME, DURATION_NAME, "
-                    "DURATION_BEGIN, DURATION_END, "
-                    "CONTROL_TYPE, TARGET_SOC, TARGET_POWER) "
+                    "NAME, DURATION_NAME, DURATION_BEGIN, DURATION_END, CONTROL_TYPE, TARGET_SOC, TARGET_POWER) "
                     "VALUES (?, ?, ?, ?, ?, ?, ?);"
-                << dayPlanName << item["durationName"].asString()
-                << item["durationBegin"].asString() << item["durationEnd"].asString()
-                << item["controlType"].asString() << item["targetSoc"].asString()
-                << item["targetPower"].asString();
+                << dayPlanName << durationName << durationBegin << durationEnd << controlType << targetSoc << targetPower;
     }
 
-    dealer_.send(zmq::message_t(postSubtitle_), zmq::send_flags::sndmore);
-    dealer_.send(zmq::message_t(), zmq::send_flags::none);
+    notifyStationReload(stationDealer);// 通知站点重新加载数据
 
     // 保存'成功'操作记录
     const string status = "success";
     const string content{ "success" };
     const string type{ "参数设置" };
-    const string timestamp = miscellaneous::getCurrentTimestamp();
-    const string username = miscellaneous::getCurrentTimestamp();
+    const string timestamp = datetime::getCurrentTimestamp();
+    const string username = datetime::getCurrentTimestamp();
     // OperationRecord::insertRecord(status, content, type, timestamp, username);
 
     // 成功响应
@@ -124,7 +215,7 @@ catch(const std::exception& e){
 }
 }
 
-void DayPlanDuration::requestCallbackGet(const httplib::Request &req, httplib::Response &res)
+void DayPlanDuration::requestCallbackGet(const httplib::Request &req, httplib::Response &res, shared_ptr<zmq::socket_t> stationDealer)
 {
 try
 {
@@ -160,7 +251,7 @@ catch(const std::exception& e){
 }
 }
 
-void DayPlanDuration::requestCallbackGetNameList(const httplib::Request &req, httplib::Response &res)
+void DayPlanDuration::requestCallbackGetNameList(const httplib::Request &req, httplib::Response &res, shared_ptr<zmq::socket_t> stationDealer)
 {
 try
 {
@@ -203,23 +294,12 @@ catch(const std::exception& e)
 }
 }
 
-void DayPlanDuration::requestCallbackDelete(const httplib::Request &req, httplib::Response &res)
+void DayPlanDuration::requestCallbackDelete(const httplib::Request &req, httplib::Response &res, shared_ptr<zmq::socket_t> stationDealer)
 {
 try
 {
-    const auto reqbody = miscellaneous::unserializedJson(req.body);
-
-    /* 鉴权 */
-    Json::Value auth;
-    if(!reqbody.isMember("auth"))
-        throw std::runtime_error("request params err");
-    auth = reqbody["auth"];
-    if(!auth.isMember("username") || !auth.isMember("password"))
-        throw std::runtime_error("request params err");
-    const string usernameAuth = auth["username"].asString();
-    const string passwordAuth = auth["password"].asString();
-    if(!UserManager::doAuth(usernameAuth, passwordAuth))
-        throw std::runtime_error("auth failed");
+    const auto reqbody = json_wrapper::deserialize(req.body);
+    const auto usernameAuth = base::UserManager::doAuth(reqbody);
     const string dayPlanName = reqbody["name"].asString();
 
     //操作数据库
@@ -251,8 +331,8 @@ try
     XftgDb << "DELETE FROM XFTG_DAYPLAN_DURATION WHERE NAME = ?;" << dayPlanName;
 
     // 通知中心
-    dealer_.send(zmq::message_t(deleteSubtitle_), zmq::send_flags::sndmore);
-    dealer_.send(zmq::message_t(), zmq::send_flags::none);
+    // stationDealer->send(zmq::message_t(deleteSubtitle_), zmq::send_flags::sndmore);
+    // stationDealer->send(zmq::message_t(), zmq::send_flags::none);
 
     Json::Value respondContent;
     respondContent["errcode"] = 0;
@@ -267,27 +347,12 @@ catch(const std::exception& e){
 }
 }
 
-void DayPlanDuration::respondCallback(std::shared_ptr<StationInfo> stationInfo, zmq::socket_t& router,
-                        const vector<byte>& identity, const vector<byte>& subtitle, const vector<byte>& body) const
-{
-    // 返回结果
-}
-
-void DayPlanDuration::requestCallbackPut(const httplib::Request &req, httplib::Response &res)
+void DayPlanDuration::requestCallbackPut(const httplib::Request &req, httplib::Response &res, shared_ptr<zmq::socket_t> stationDealer)
 {
 try
 {
-    const auto reqbody = miscellaneous::unserializedJson(req.body);
-
-    /* 鉴权 */
-    Json::Value auth;
-    if(!reqbody.isMember("auth"))
-        throw std::runtime_error("request params err");
-    auth = reqbody["auth"];
-    if(!auth.isMember("username") || !auth.isMember("password"))
-        throw std::runtime_error("request params err");
-    if(!UserManager::doAuth(auth["username"].asString(), auth["password"].asString()))
-        throw std::runtime_error("auth failed");
+    const auto reqbody = json_wrapper::deserialize(req.body);
+    const auto usernameAuth = base::UserManager::doAuth(reqbody);
 
     /** 解析业务参数 */
     if(!reqbody.isMember("name") || !reqbody.isMember("durationList"))
@@ -347,15 +412,15 @@ try
         }
     }
 
-    dealer_.send(zmq::message_t(putSubtitle_), zmq::send_flags::sndmore);
-    dealer_.send(zmq::message_t(), zmq::send_flags::none);
+    // stationDealer->send(zmq::message_t(putSubtitle_), zmq::send_flags::sndmore);
+    // stationDealer->send(zmq::message_t(), zmq::send_flags::none);
 
     // 保存'成功'操作记录
     const string status = "success";
     const string content{ "success" };
     const string type{ "参数设置" };
-    const string timestamp = miscellaneous::getCurrentTimestamp();
-    const string username = miscellaneous::getCurrentTimestamp();
+    const string timestamp = datetime::getCurrentTimestamp();
+    const string username = datetime::getCurrentTimestamp();
     // OperationRecord::insertRecord(status, content, type, timestamp, username);
 
     // 成功响应
@@ -371,128 +436,6 @@ catch(const std::exception& e)
     respondmsg["errmsg"] = e.what();
     utils::httpRespond(res, respondmsg);
 }
-}
-
-string DayPlanDuration::createTable()
-{
-    string finalResult;
-
-    try
-    {
-        /* code */
-        const string projectPath{ "/opt/paceic_ems_server/main" };
-        const string dbPath{ projectPath + "/db" };
-        BOOST_ASSERT(filesystem::is_directory(dbPath));
-
-        const string filename{ dbPath + "/Xftg.sqlite" };
-        sqlite::database XftgDb(filename);
-
-        XftgDb << "CREATE TABLE IF NOT EXISTS XFTG_DAYPLAN_DURATION("
-                              "NAME TEXT,"
-                              "DURATION_NAME TEXT,"
-                              "DURATION_BEGIN TEXT,"
-                              "DURATION_END TEXT,"
-                              "CONTROL_TYPE TEXT,"
-                              "TARGET_SOC TEXT, "
-                              "TARGET_POWER TEXT, "
-                              "PRIMARY KEY(NAME, DURATION_NAME))";
-        finalResult =  filename;
-    }
-    catch(const std::exception& e)
-    {
-        std::cerr << e.what() << '\n';
-        return string();
-    }
-    return finalResult;
-}
-
-bool DayPlanDuration::insertIntoDefaultRecord()
-{
-    try
-    {
-        /* code */
-        const string projectPath{ "/opt/paceic_ems_server/main" };
-        const string dbPath{ projectPath + "/db" };
-        BOOST_ASSERT(filesystem::is_directory(dbPath));
-
-        const string filename{ dbPath + "/Xftg.sqlite" };
-        sqlite::database XftgDb(filename);
-
-        XftgDb << "DELETE FROM XFTG_DAYPLAN_DURATION;";// clear old records
-
-        /** 这里模拟两充一放的时段组合，共3条记录 */
-        {
-            XftgDb << "INSERT INTO XFTG_DAYPLAN_DURATION ("
-                        "NAME, DURATION_NAME, "
-                        "DURATION_BEGIN, DURATION_END, "
-                        "CONTROL_TYPE, TARGET_SOC, TARGET_POWER) "
-                        "VALUES (?, ?, ?, ?, ?, ?, ?);"
-                        << "dayPlanDuration1" << "duration1"
-                        << "00:00" << "08:00"
-                        << "charge" << "100%" << "10kW";
-                        
-            XftgDb << "INSERT INTO XFTG_DAYPLAN_DURATION ("
-                        "NAME, DURATION_NAME, "
-                        "DURATION_BEGIN, DURATION_END, "
-                        "CONTROL_TYPE, TARGET_SOC, TARGET_POWER) "
-                        "VALUES (?, ?, ?, ?, ?, ?, ?);"
-                        << "dayPlanDuration1" << "duration2"
-                        << "08:00" << "12:00"
-                        << "charge" << "100%" << "10kW";
-
-            XftgDb << "INSERT INTO XFTG_DAYPLAN_DURATION ("
-                        "NAME, DURATION_NAME, "
-                        "DURATION_BEGIN, DURATION_END, "
-                        "CONTROL_TYPE, TARGET_SOC, TARGET_POWER) "
-                        "VALUES (?, ?, ?, ?, ?, ?, ?);"
-                        << "dayPlanDuration1" << "duration3"
-                        << "12:00" << "~"
-                        << "charge" << "100%" << "10kW";
-        }
-
-        /** 这里模拟两充两放的时段组合，共4条记录 */
-        {
-            XftgDb << "INSERT INTO XFTG_DAYPLAN_DURATION ("
-                        "NAME, DURATION_NAME, "
-                        "DURATION_BEGIN, DURATION_END, "
-                        "CONTROL_TYPE, TARGET_SOC, TARGET_POWER) "
-                        "VALUES (?, ?, ?, ?, ?, ?, ?);"
-                        << "dayPlanDuration2" << "duration1"
-                        << "00:00" << "08:00"
-                        << "charge" << "100%" << "10kW";
-                        
-            XftgDb << "INSERT INTO XFTG_DAYPLAN_DURATION ("
-                        "NAME, DURATION_NAME, "
-                        "DURATION_BEGIN, DURATION_END, "
-                        "CONTROL_TYPE, TARGET_SOC, TARGET_POWER) "
-                        "VALUES (?, ?, ?, ?, ?, ?, ?);"
-                        << "dayPlanDuration2" << "duration2"
-                        << "08:00" << "12:00"
-                        << "discharge" << "100%" << "10kW";
-
-            XftgDb << "INSERT INTO XFTG_DAYPLAN_DURATION ("
-                        "NAME, DURATION_NAME, "
-                        "DURATION_BEGIN, DURATION_END, "
-                        "CONTROL_TYPE, TARGET_SOC, TARGET_POWER) "
-                        "VALUES (?, ?, ?, ?, ?, ?, ?);"
-                        << "dayPlanDuration2" << "duration3"
-                        << "12:00" << "19:00"
-                        << "charge" << "100%" << "10kW";
-            XftgDb << "INSERT INTO XFTG_DAYPLAN_DURATION ("
-                        "NAME, DURATION_NAME, "
-                        "DURATION_BEGIN, DURATION_END, "
-                        "CONTROL_TYPE, TARGET_SOC, TARGET_POWER) "
-                        "VALUES (?, ?, ?, ?, ?, ?, ?);"
-                        << "dayPlanDuration2" << "duration4"
-                        << "19:00" << "~"
-                        << "discharge" << "100%" << "10kW";
-        }
-        return true;
-    }
-    catch(const std::exception& e){
-        std::cerr << e.what() << '\n';
-    }
-    return {};
 }
 
 vector<DayPlanDuration::Record> DayPlanDuration::getRecord(const string& name)

@@ -4,63 +4,97 @@
 #include "json/json.h"
 #include "sqlite_modern_cpp.h"
 #include <regex>
-#include "ems/station/UserManager.h"
-#include "ems/station/OperationRecord.h"
+#include "ems/base/UserManager.h"
+#include "ems/base/OperationRecord.h"
 #include "utils/Miscellaneous.h"
 #include "utils/MsgpackWrapper_src.hpp"
 #include "utils/AuthException.h"
+#include "utils/datetime.h"
+#include "utils/jsonWrapper.h"
 
+using namespace ems;
 using namespace ems::xftg;
 
-WeekPlan::WeekPlan()
-    : identity_("XftgWeekPlan")
-    , dealer_(miscellaneous::createZmqSocket(zmq::socket_type::dealer))
-{
-    createTable();
-    insertIntoDefaultRecord();
-    registerHttpInterfaces();
-    dealer_.set(zmq::sockopt::routing_id, identity_);
-    dealer_.connect("tcp://127.0.0.1:6200");
-}
-
-vector<byte> WeekPlan::identity()
-{
-    const auto beginItr = reinterpret_cast<const byte*>(identity_.data());
-    return { beginItr, beginItr + identity_.size() };
-}
-
-void WeekPlan::registerHttpInterfaces()
-{
-    using namespace std::placeholders;
-    auto& serv = utils::getHttpServerSingleton();
-    serv.Post("/strategy/xftg/weekPlan", httplib::Server::Handler(bind(&WeekPlan::requestCallbackPost, this, _1, _2)));
-    serv.Get("/strategy/xftg/weekPlan", httplib::Server::Handler(bind(&WeekPlan::requestCallbackGet, this, _1, _2)));
-    serv.Get("/strategy/xftg/weekPlan/namelist", httplib::Server::Handler(bind(&WeekPlan::requestCallbackGetNameList, this, _1, _2)));
-    serv.Delete("/strategy/xftg/weekPlan", httplib::Server::Handler(bind(&WeekPlan::requestCallbackDelete, this, _1, _2)));
-    serv.Put("/strategy/xftg/weekPlan", httplib::Server::Handler(bind(&WeekPlan::requestCallbackPut, this, _1, _2)));
-}
-
-void WeekPlan::respondCallback(std::shared_ptr<StationInfo> stationInfo, zmq::socket_t& router,
-                        const vector<byte>& identity, const vector<byte>& subtitle, const vector<byte>& body) const
-{
-    // 返回结果
-}
-
-void WeekPlan::requestCallbackPost(const httplib::Request &req, httplib::Response &res)
+void WeekPlan::createTable()
 {
 try
 {
-    const auto reqbody = miscellaneous::unserializedJson(req.body);
+    const string projectPath{ "/opt/paceic_ems_server/main" };
+    const string dbPath{ projectPath + "/db" };
+    BOOST_ASSERT(filesystem::is_directory(dbPath));
 
-    /* 鉴权 */
-    Json::Value auth;
-    if(!reqbody.isMember("auth"))
-        throw std::runtime_error("request params err");
-    auth = reqbody["auth"];
-    if(!auth.isMember("username") || !auth.isMember("password"))
-        throw std::runtime_error("request params err");
-    if(!UserManager::doAuth(auth["username"].asString(), auth["password"].asString()))
-        throw std::runtime_error("auth failed");
+    const string filename{ dbPath + "/Xftg.sqlite" };
+    sqlite::database XftgDb(filename);
+
+    XftgDb << "CREATE TABLE IF NOT EXISTS XFTG_WEEK_PLAN("
+                            "NAME TEXT PRIMARY KEY,"
+                            "DAYPLAN_DURATION_NAME TEXT,"
+                            "DAYPLAN_PROTECT_NAME TEXT,"
+                            "DAY_WHITE_LIST TEXT,"
+                            "VALID_DATE_BEGIN TEXT,"
+                            "VALID_DATE_END TEXT, "
+                            "PRIORITY TEXT, "
+                            "BIND_SYSTEM TEXT);";
+}
+catch(const std::exception& e){
+    std::cerr << e.what() << '\n';
+}
+}
+
+void WeekPlan::insertIntoDefaultRecord()
+{
+try
+{
+    const string projectPath{ "/opt/paceic_ems_server/main" };
+    const string dbPath{ projectPath + "/db" };
+    BOOST_ASSERT(filesystem::is_directory(dbPath));
+
+    const string filename{ dbPath + "/Xftg.sqlite" };
+    sqlite::database XftgDb(filename);
+
+    // XftgDb << "DELETE FROM XFTG_WEEK_PLAN;";// clear old records
+    int recordCount{0};
+    XftgDb << "SELECT COUNT(*) FROM XFTG_WEEK_PLAN;" >> recordCount;
+    if(recordCount > 0) return;
+
+    XftgDb << "INSERT INTO XFTG_WEEK_PLAN ("
+                "NAME, "
+                "DAYPLAN_DURATION_NAME, "
+                "DAYPLAN_PROTECT_NAME, "
+                "DAY_WHITE_LIST, "
+                "VALID_DATE_BEGIN, VALID_DATE_END, "
+                "PRIORITY, BIND_SYSTEM) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?);"
+                << "weekPlan1"
+                << "dayPlanDuration1" << "dayPlanProtect1"
+                << createDayOfWeekListString({ 1, 2, 3, 4, 5, 6, 7 })
+                << "1990-01-01" << "2050-01-01"
+                << "level1" << "branch1";
+    XftgDb << "INSERT INTO XFTG_WEEK_PLAN ("
+                "NAME, "
+                "DAYPLAN_DURATION_NAME, "
+                "DAYPLAN_PROTECT_NAME, "
+                "DAY_WHITE_LIST, "
+                "VALID_DATE_BEGIN, VALID_DATE_END, "
+                "PRIORITY, BIND_SYSTEM) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?);"
+                << "weekPlan2"
+                << "dayPlanDuration2" << "dayPlanProtect2"
+                << createDayOfWeekListString({ 1, 2, 3, 4, 5, 6, 7 })
+                << "2024-01-01" << "2025-01-01"
+                << "level2" << "branch1";
+}
+catch(const std::exception& e){
+    std::cerr << e.what() << '\n';
+}
+}
+
+void WeekPlan::requestCallbackPost(const httplib::Request &req, httplib::Response &res, shared_ptr<zmq::socket_t> stationDealer)
+{
+try
+{
+    const auto reqbody = json_wrapper::deserialize(req.body);
+    const string usernameAuth = base::UserManager::doAuth(reqbody);/* 鉴权 */
 
     /** 解析业务参数 */
     if(!reqbody.isMember("name") 
@@ -93,7 +127,7 @@ try
         XftgDb << "SELECT COUNT(*) FROM XFTG_WEEK_PLAN WHERE NAME = ?;"
             << weekPlanName >> recordCount;
         if(recordCount > 0)
-            throw AuthException("记录已存在", auth["username"].asString());
+            throw AuthException("记录已存在", usernameAuth);
     }
     {
         // 检查DayPlan记录是否已存在
@@ -101,7 +135,7 @@ try
         XftgDb << "SELECT COUNT(*) FROM XFTG_DAYPLAN_DURATION WHERE NAME = ?;"
             << dayPlanDurationName >> recordCount;
         if(recordCount == 0)
-            throw AuthException("日计划不存在", auth["username"].asString());
+            throw AuthException("日计划不存在", usernameAuth);
     }
     {
         // 检查DayPlan记录是否已存在
@@ -109,7 +143,7 @@ try
         XftgDb << "SELECT COUNT(*) FROM XFTG_DAYPLAN_PROTECT WHERE NAME = ?;"
             << dayPlanProtectName >> recordCount;
         if(recordCount == 0)
-            throw AuthException("保护计划不存在", auth["username"].asString());
+            throw AuthException("保护计划不存在", usernameAuth);
     }
 
     XftgDb << "INSERT INTO XFTG_WEEK_PLAN ("
@@ -125,15 +159,15 @@ try
             << dayWhiteList << validDateBegin << validDateEnd
             << priority << bindSystem;
 
-    dealer_.send(zmq::message_t(postSubtitle_), zmq::send_flags::sndmore);
-    dealer_.send(zmq::message_t(), zmq::send_flags::none);
+    // stationDealer->send(zmq::message_t(postSubtitle_), zmq::send_flags::sndmore);
+    // stationDealer->send(zmq::message_t(), zmq::send_flags::none);
 
     // 保存'成功'操作记录
     const string status = "success";
     const string content{ "success" };
     const string type{ "参数设置" };
-    const string timestamp = miscellaneous::getCurrentTimestamp();
-    const string username = miscellaneous::getCurrentTimestamp();
+    const string timestamp = datetime::getCurrentTimestamp();
+    const string username = datetime::getCurrentTimestamp();
     // OperationRecord::insertRecord(status, content, type, timestamp, username);
 
     // 成功响应
@@ -150,7 +184,7 @@ catch(const std::exception& e){
 }
 }
 
-void WeekPlan::requestCallbackGet(const httplib::Request &req, httplib::Response &res)
+void WeekPlan::requestCallbackGet(const httplib::Request &req, httplib::Response &res, shared_ptr<zmq::socket_t> stationDealer)
 {
 try
 {
@@ -205,7 +239,7 @@ catch(const std::exception& e){
 }
 }
 
-void WeekPlan::requestCallbackGetNameList(const httplib::Request &req, httplib::Response &res)
+void WeekPlan::requestCallbackGetNameList(const httplib::Request &req, httplib::Response &res, shared_ptr<zmq::socket_t> stationDealer)
 {
 try
 {
@@ -240,21 +274,12 @@ catch(const std::exception& e){
 }
 }
 
-void WeekPlan::requestCallbackDelete(const httplib::Request &req, httplib::Response &res)
+void WeekPlan::requestCallbackDelete(const httplib::Request &req, httplib::Response &res, shared_ptr<zmq::socket_t> stationDealer)
 {
 try
 {
-    const auto reqbody = miscellaneous::unserializedJson(req.body);
-
-    /* 鉴权 */
-    Json::Value auth;
-    if(!reqbody.isMember("auth"))
-        throw std::runtime_error("request params err");
-    auth = reqbody["auth"];
-    if(!auth.isMember("username") || !auth.isMember("password"))
-        throw std::runtime_error("request params err");
-    if(!UserManager::doAuth(auth["username"].asString(), auth["password"].asString()))
-        throw std::runtime_error("auth failed");
+    const auto reqbody = json_wrapper::deserialize(req.body);
+    const string usernameAuth = base::UserManager::doAuth(reqbody);/* 鉴权 */
 
     /** 解析业务参数 */
     if(!reqbody.isMember("name"))
@@ -279,8 +304,8 @@ try
     // 执行删除
     XftgDb << "DELETE FROM XFTG_WEEK_PLAN WHERE NAME = ?;" << weekPlanName;
 
-    dealer_.send(zmq::message_t(deleteSubtitle_), zmq::send_flags::sndmore);
-    dealer_.send(zmq::message_t(), zmq::send_flags::none);
+    // stationDealer->send(zmq::message_t(deleteSubtitle_), zmq::send_flags::sndmore);
+    // stationDealer->send(zmq::message_t(), zmq::send_flags::none);
 
     Json::Value respondContent;
     respondContent["errcode"] = 0;
@@ -296,23 +321,12 @@ catch(const std::exception& e)
 }
 }
 
-void WeekPlan::requestCallbackPut(const httplib::Request &req, httplib::Response &res)
+void WeekPlan::requestCallbackPut(const httplib::Request &req, httplib::Response &res, shared_ptr<zmq::socket_t> stationDealer)
 {
 try
 {
-    const auto reqbody = miscellaneous::unserializedJson(req.body);
-
-    /* 鉴权 */
-    Json::Value auth;
-    if(!reqbody.isMember("auth"))
-        throw std::runtime_error("request params err");
-    auth = reqbody["auth"];
-    if(!auth.isMember("username") || !auth.isMember("password"))
-        throw std::runtime_error("request params err");
-    const string usernameAuth = auth["username"].asString();
-    const string passwordAuth = auth["password"].asString();
-    if(!UserManager::doAuth(usernameAuth, passwordAuth))
-        throw std::runtime_error("auth failed");
+    const auto reqbody = json_wrapper::deserialize(req.body);
+    const string usernameAuth = base::UserManager::doAuth(reqbody);/* 鉴权 */
 
     /** 解析业务参数 */
     if(!reqbody.isMember("name") 
@@ -376,15 +390,15 @@ try
                         << priority << bindSystem
                         << weekPlanName;
 
-    dealer_.send(zmq::message_t(putSubtitle_), zmq::send_flags::sndmore);
-    dealer_.send(zmq::message_t(), zmq::send_flags::none);
+    // stationDealer->send(zmq::message_t(putSubtitle_), zmq::send_flags::sndmore);
+    // stationDealer->send(zmq::message_t(), zmq::send_flags::none);
 
     // 保存'成功'操作记录
     const string status { "success" };
     const string content{ "success" };
     const string type{ "参数设置" };
-    const string timestamp = miscellaneous::getCurrentTimestamp();
-    const string username = miscellaneous::getCurrentTimestamp();
+    const string timestamp = datetime::getCurrentTimestamp();
+    const string username = datetime::getCurrentTimestamp();
     // OperationRecord::insertRecord(status, content, type, timestamp, username);
 
     // 成功响应
@@ -398,14 +412,14 @@ catch(const std::exception& e){
     const string status = "failed";
     const string content{ e.what() };
     const string type{ "参数设置" };
-    const string timestamp = miscellaneous::getCurrentTimestamp();
-    const string username = miscellaneous::getCurrentTimestamp();
+    const string timestamp = datetime::getCurrentTimestamp();
+    const string username = datetime::getCurrentTimestamp();
     // OperationRecord::insertRecord("失败", "修改削峰填俗-周计划 ", "用户管理", usernameAuth);
 
     //记录错误操作日志
     auto authException = dynamic_cast<const AuthException*>(&e);
     if(authException){
-        OperationRecord::insertRecord("失败", authException->what(), "参数设置", authException->username());
+        base::OperationRecord::insertRecord("失败", authException->what(), "参数设置", authException->username());
     }
 
     // 失败响应
@@ -414,35 +428,6 @@ catch(const std::exception& e){
     respondmsg["errmsg"] = e.what();
     utils::httpRespond(res, respondmsg);
 }   
-}
-
-std::optional<string> WeekPlan::createTable()
-{
-    try
-    {
-        /* code */
-        const string projectPath{ "/opt/paceic_ems_server/main" };
-        const string dbPath{ projectPath + "/db" };
-        BOOST_ASSERT(filesystem::is_directory(dbPath));
-
-        const string filename{ dbPath + "/Xftg.sqlite" };
-        sqlite::database XftgDb(filename);
-
-        XftgDb << "CREATE TABLE IF NOT EXISTS XFTG_WEEK_PLAN("
-                              "NAME TEXT PRIMARY KEY,"
-                              "DAYPLAN_DURATION_NAME TEXT,"
-                              "DAYPLAN_PROTECT_NAME TEXT,"
-                              "DAY_WHITE_LIST TEXT,"
-                              "VALID_DATE_BEGIN TEXT,"
-                              "VALID_DATE_END TEXT, "
-                              "PRIORITY TEXT, "
-                              "BIND_SYSTEM TEXT);";
-        return filename;
-    }
-    catch(const std::exception& e){
-        std::cerr << e.what() << '\n';
-    }
-    return {};
 }
 
 string WeekPlan::createDayOfWeekListString(const vector<int>& dayOfWeekList)
@@ -495,66 +480,6 @@ vector<int> WeekPlan::convertDayofWeekListfromString(const string& data)
     return dayOfWeekList;
 }
 
-bool WeekPlan::insertIntoDefaultRecord()
-{
-    try
-    {
-        /* code */
-        const string projectPath{ "/opt/paceic_ems_server/main" };
-        const string dbPath{ projectPath + "/db" };
-        BOOST_ASSERT(filesystem::is_directory(dbPath));
-
-        const string filename{ dbPath + "/Xftg.sqlite" };
-        sqlite::database XftgDb(filename);
-
-        XftgDb << "DELETE FROM XFTG_WEEK_PLAN;";// clear old records
-
-        // Json::Value jsonArray;
-        // jsonArray.append(1);
-        // jsonArray.append(3);
-        // jsonArray.append(5);
-        // string jsonArrayString;
-        // {
-        //     Json::StreamWriterBuilder builder;
-        //     builder["emitUTF8"] = true;//输出编码格式
-        //     builder["indentation"] = "";//两个空格缩进
-        //     jsonArrayString = Json::writeString(builder, jsonArray);
-        // }
-
-        XftgDb << "INSERT INTO XFTG_WEEK_PLAN ("
-                    "NAME, "
-                    "DAYPLAN_DURATION_NAME, "
-                    "DAYPLAN_PROTECT_NAME, "
-                    "DAY_WHITE_LIST, "
-                    "VALID_DATE_BEGIN, VALID_DATE_END, "
-                    "PRIORITY, BIND_SYSTEM) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?);"
-                    << "weekPlan1"
-                    << "dayPlanDuration1" << "dayPlanProtect1"
-                    << createDayOfWeekListString({ 1, 2, 3, 4, 5, 6, 7 })
-                    << "1990-01-01" << "2050-01-01"
-                    << "level1" << "branch1";
-        XftgDb << "INSERT INTO XFTG_WEEK_PLAN ("
-                    "NAME, "
-                    "DAYPLAN_DURATION_NAME, "
-                    "DAYPLAN_PROTECT_NAME, "
-                    "DAY_WHITE_LIST, "
-                    "VALID_DATE_BEGIN, VALID_DATE_END, "
-                    "PRIORITY, BIND_SYSTEM) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?);"
-                    << "weekPlan2"
-                    << "dayPlanDuration2" << "dayPlanProtect2"
-                    << createDayOfWeekListString({ 1, 2, 3, 4, 5, 6, 7 })
-                    << "2024-01-01" << "2025-01-01"
-                    << "level2" << "branch1";
-        return true;
-    }
-    catch(const std::exception& e){
-        std::cerr << e.what() << '\n';
-    }
-    return {};
-}
-
 std::optional<WeekPlan::Record> WeekPlan::getRecord(const string& name)
 {
     try
@@ -600,38 +525,38 @@ std::optional<WeekPlan::Record> WeekPlan::getRecord(const string& name)
 
 std::optional<vector<WeekPlan::RecordWithName>> WeekPlan::getAllRecords()
 {
-    try
-    {
-        /* code */
-        const string projectPath{ "/opt/paceic_ems_server/main" };
-        const string dbPath{ projectPath + "/db" };
-        BOOST_ASSERT(filesystem::is_directory(dbPath));
+try
+{
+    /* code */
+    const string projectPath{ "/opt/paceic_ems_server/main" };
+    const string dbPath{ projectPath + "/db" };
+    BOOST_ASSERT(filesystem::is_directory(dbPath));
 
-        const string filename{ dbPath + "/Xftg.sqlite" };
-        sqlite::database XftgDb(filename);
+    const string filename{ dbPath + "/Xftg.sqlite" };
+    sqlite::database XftgDb(filename);
 
-        vector<RecordWithName> RecordWithNameList;
+    vector<RecordWithName> RecordWithNameList;
 
-        // 查询
-        XftgDb << "SELECT * FROM XFTG_WEEK_PLAN;"
-                        >> [&](string name, string dayPlanDurationName, string dayPlanProtectName,
-                                string dayWhiteList,
-                                string validDateBegin, string validDateEnd,
-                                string priority, string bindSystem){
-                    
-                            RecordWithNameList.emplace_back(name, dayPlanDurationName, dayPlanProtectName,
-                                                dayWhiteList, validDateBegin, validDateEnd,
-                                                priority, bindSystem);
-                            };
-        if(!RecordWithNameList.empty()){
-            std::optional<vector<RecordWithName>> optValue;
-            optValue.emplace(RecordWithNameList);
-            return optValue;
-        }
-        return {};
+    // 查询
+    XftgDb << "SELECT * FROM XFTG_WEEK_PLAN;"
+                    >> [&](string name, string dayPlanDurationName, string dayPlanProtectName,
+                            string dayWhiteList,
+                            string validDateBegin, string validDateEnd,
+                            string priority, string bindSystem){
+                
+                        RecordWithNameList.emplace_back(name, dayPlanDurationName, dayPlanProtectName,
+                                            dayWhiteList, validDateBegin, validDateEnd,
+                                            priority, bindSystem);
+                        };
+    if(!RecordWithNameList.empty()){
+        std::optional<vector<RecordWithName>> optValue;
+        optValue.emplace(RecordWithNameList);
+        return optValue;
     }
-    catch(const std::exception& e){
-        std::cerr << e.what() << '\n';
-    }
+    return {};
+}
+catch(const std::exception& e){
+    std::cerr << e.what() << '\n';
+}
     return {};
 }

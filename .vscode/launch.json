@@ -5,10 +5,10 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "station",
+            "name": "station_main",
             "type": "cppdbg",
             "request": "launch",
-            "program": "${workspaceFolder}/../server_build/bin/station",
+            "program": "${workspaceFolder}/../server_build/bin/station_main",
             "args": [],
             "stopAtEntry": false,
             "cwd": "${fileDirname}",
@@ -30,10 +30,10 @@
             ]
         },
         {
-            "name": "dealerTest",
+            "name": "station2_test",
             "type": "cppdbg",
             "request": "launch",
-            "program": "${workspaceFolder}/../server_build/bin/dealerTest",
+            "program": "${workspaceFolder}/../server_build/bin/station2_test",
             "args": [],
             "stopAtEntry": false,
             "cwd": "${fileDirname}",

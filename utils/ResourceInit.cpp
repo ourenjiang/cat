@@ -29,22 +29,21 @@ void ems::utils::configurationInit()
 
 void ems::utils::configurationInitFromEnv()
 {
-    try
-    {
-        const string envName{ "PACEIC_EMS_SERVER" };
-        const char* envValue = std::getenv(envName.c_str());
-        if(!envValue){
-            throw std::runtime_error("env variables 'PACEIC_EMS_SERVER' not set");
-        }
-        string filename(envValue);
-        filename += "/etc/config.yaml";
-        YamlcppWrapper::init(filename);
+try
+{
+    const string envName{ "PACEIC_EMS_SERVER" };
+    const char* envValue = std::getenv(envName.c_str());
+    if(!envValue){
+        throw std::runtime_error("env variables 'PACEIC_EMS_SERVER' not set");
     }
-    catch(const std::exception& e)
-    {
-        std::cerr << e.what() << '\n';
-        std::quick_exit(-1);
-    }
+    string filename(envValue);
+    filename += "/etc/config.yaml";
+    YamlcppWrapper::init(filename);
+}
+catch(const std::exception& e){
+    std::cerr << e.what() << '\n';
+    std::quick_exit(-1);
+}
 }
 
 void ems::utils::logInit()

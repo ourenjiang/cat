@@ -3,63 +3,78 @@
 #include "boost/assert.hpp"
 #include <filesystem>
 #include "sqlite_modern_cpp.h"
-#include "ems/station/UserManager.h"
+#include "ems/base/UserManager.h"
+#include "ems/interface/OperationRecord.h"
 #include "utils/AuthException.h"
-#include "ems/station/OperationRecord.h"
 #include "utils/Miscellaneous.h"
 #include "utils/MsgpackWrapper_src.hpp"
+#include "utils/datetime.h"
+#include "utils/jsonWrapper.h"
 
 using namespace ems::xftg;
 
-DayPlanProtect::DayPlanProtect()
-    : identity_("XftgDayPlanProtect")
-    , dealer_(miscellaneous::createZmqSocket(zmq::socket_type::dealer))
-{
-    createTable();
-    insertIntoDefaultRecord();
-    registerHttpInterfaces();
-    dealer_.set(zmq::sockopt::routing_id, identity_);
-    dealer_.connect("tcp://127.0.0.1:6200");
-}
-
-vector<byte> DayPlanProtect::identity()
-{
-    const auto beginItr = reinterpret_cast<const byte*>(identity_.data());
-    return { beginItr, beginItr + identity_.size() };
-}
-
-void DayPlanProtect::registerHttpInterfaces()
-{
-    using namespace std::placeholders;
-    auto& serv = utils::getHttpServerSingleton();
-    serv.Post("/strategy/protectParams", httplib::Server::Handler(bind(&DayPlanProtect::requestCallbackPost, this, _1, _2)));
-    serv.Get("/strategy/protectParams", httplib::Server::Handler(bind(&DayPlanProtect::requestCallbackGet, this, _1, _2)));
-    serv.Get("/strategy/protectParams/namelist", httplib::Server::Handler(bind(&DayPlanProtect::requestCallbackGetNameList, this, _1, _2)));
-    serv.Delete("/strategy/protectParams", httplib::Server::Handler(bind(&DayPlanProtect::requestCallbackDelete, this, _1, _2)));
-    serv.Put("/strategy/protectParams", httplib::Server::Handler(bind(&DayPlanProtect::requestCallbackPut, this, _1, _2)));
-}
-
-void DayPlanProtect::respondCallback(std::shared_ptr<StationInfo> stationInfo, zmq::socket_t& router,
-                        const vector<byte>& identity, const vector<byte>& subtitle, const vector<byte>& body) const
-{
-
-}                        
-
-void DayPlanProtect::requestCallbackPost(const httplib::Request &req, httplib::Response &res)
+void DayPlanProtect::createTable()
 {
 try
 {
-    const auto reqbody = miscellaneous::unserializedJson(req.body);
+    const string projectPath{ "/opt/paceic_ems_server/main" };
+    const string dbPath{ projectPath + "/db" };
+    BOOST_ASSERT(filesystem::is_directory(dbPath));
 
-    /* 鉴权 */
-    Json::Value auth;
-    if(!reqbody.isMember("auth"))
-        throw std::runtime_error("request params err");
-    auth = reqbody["auth"];
-    if(!auth.isMember("username") || !auth.isMember("password"))
-        throw std::runtime_error("request params err");
-    if(!UserManager::doAuth(auth["username"].asString(), auth["password"].asString()))
-        throw std::runtime_error("auth failed");
+    const string filename{ dbPath + "/Xftg.sqlite" };
+    sqlite::database XftgDb(filename);
+
+    XftgDb << "CREATE TABLE IF NOT EXISTS XFTG_DAYPLAN_PROTECT("
+                "NAME TEXT PRIMARY KEY,"
+                "SOC_MAX TEXT,"
+                "SOC_MIN TEXT,"
+                "TRANSFORMER_POWER_MAX TEXT,"
+                "POWER_STEP_SIZE TEXT,"
+                "CHARGE_POWER_MAX TEXT, "
+                "DISCHARGE_POWER_MAX TEXT);";
+}
+catch(const std::exception& e){
+    std::cerr << e.what() << '\n';
+}
+}
+
+void DayPlanProtect::insertIntoDefaultRecord()
+{
+try
+{
+    const string projectPath{ "/opt/paceic_ems_server/main" };
+    const string dbPath{ projectPath + "/db" };
+    BOOST_ASSERT(filesystem::is_directory(dbPath));
+
+    const string filename{ dbPath + "/Xftg.sqlite" };
+    sqlite::database XftgDb(filename);
+
+    int recordCount{0};
+    XftgDb << "SELECT COUNT(*) FROM XFTG_DAYPLAN_PROTECT;" >> recordCount;
+    if(recordCount > 0) return;
+
+    XftgDb << "INSERT INTO XFTG_DAYPLAN_PROTECT ("
+                "NAME, SOC_MAX, SOC_MIN, TRANSFORMER_POWER_MAX, "
+                "POWER_STEP_SIZE, CHARGE_POWER_MAX, DISCHARGE_POWER_MAX) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?);"
+            << "dayPlanProtect1" << "100%" << "10%" << "100kW" << "5kW" << "25kW" << "15kW";
+    XftgDb << "INSERT INTO XFTG_DAYPLAN_PROTECT ("
+                "NAME, SOC_MAX, SOC_MIN, TRANSFORMER_POWER_MAX, "
+                "POWER_STEP_SIZE, CHARGE_POWER_MAX, DISCHARGE_POWER_MAX) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?);"
+            << "dayPlanProtect2" << "90%" << "20%" << "50kW" << "1kW" << "20kW" << "30kW";
+}
+catch(const std::exception& e){
+    std::cerr << e.what() << '\n';
+}
+}
+
+void DayPlanProtect::requestCallbackPost(const httplib::Request &req, httplib::Response &res, shared_ptr<zmq::socket_t> stationDealer)
+{
+try
+{
+    const auto reqbody = json_wrapper::deserialize(req.body);
+    const auto usernameAuth = base::UserManager::doAuth(reqbody);
 
     /** 解析业务参数 */
     if(!reqbody.isMember("name") 
@@ -89,7 +104,7 @@ try
     XftgDb << "SELECT COUNT(*) FROM XFTG_DAYPLAN_PROTECT WHERE NAME = ?;"
         << dayPlanName >> recordCount;
     if(recordCount > 0)
-        throw AuthException("记录已存在", auth["username"].asString());
+        throw AuthException("记录已存在", usernameAuth);
 
     XftgDb << "INSERT INTO XFTG_DAYPLAN_PROTECT ("
                 "NAME, "
@@ -103,15 +118,15 @@ try
             << transformerPowerMax << powerStepSize
             << chargePowerMax << dischargePowerMax;
 
-    dealer_.send(zmq::message_t(postSubtitle_), zmq::send_flags::sndmore);
-    dealer_.send(zmq::message_t(), zmq::send_flags::none);
+    // stationDealer->send(zmq::message_t(postSubtitle_), zmq::send_flags::sndmore);
+    // stationDealer->send(zmq::message_t(), zmq::send_flags::none);
     
     // 保存'成功'操作记录
     const string status = "success";
     const string content{ "success" };
     const string type{ "参数设置" };
-    const string timestamp = miscellaneous::getCurrentTimestamp();
-    const string username = miscellaneous::getCurrentTimestamp();
+    const string timestamp = datetime::getCurrentTimestamp();
+    const string username = datetime::getCurrentTimestamp();
     // OperationRecord::insertRecord(status, content, type, timestamp, username);
 
     // 成功响应
@@ -128,7 +143,7 @@ catch(const std::exception& e){
 }
 }
 
-void DayPlanProtect::requestCallbackGet(const httplib::Request &req, httplib::Response &res)
+void DayPlanProtect::requestCallbackGet(const httplib::Request &req, httplib::Response &res, shared_ptr<zmq::socket_t> stationDealer)
 {
 try
 {
@@ -164,7 +179,7 @@ catch(const std::exception& e){
 }
 }
 
-void DayPlanProtect::requestCallbackGetNameList(const httplib::Request &req, httplib::Response &res)
+void DayPlanProtect::requestCallbackGetNameList(const httplib::Request &req, httplib::Response &res, shared_ptr<zmq::socket_t> stationDealer)
 {
 try
 {
@@ -201,21 +216,12 @@ catch(const std::exception& e){
 }
 }
 
-void DayPlanProtect::requestCallbackDelete(const httplib::Request &req, httplib::Response &res)
+void DayPlanProtect::requestCallbackDelete(const httplib::Request &req, httplib::Response &res, shared_ptr<zmq::socket_t> stationDealer)
 {
 try
 {
-    const auto reqbody = miscellaneous::unserializedJson(req.body);
-
-    /* 鉴权 */
-    Json::Value auth;
-    if(!reqbody.isMember("auth"))
-        throw std::runtime_error("request params err");
-    auth = reqbody["auth"];
-    if(!auth.isMember("username") || !auth.isMember("password"))
-        throw std::runtime_error("request params err");
-    if(!UserManager::doAuth(auth["username"].asString(), auth["password"].asString()))
-        throw std::runtime_error("auth failed");
+    const auto reqbody = json_wrapper::deserialize(req.body);
+    const auto usernameAuth = base::UserManager::doAuth(reqbody);
 
     /** 解析业务参数 */
     if(!reqbody.isMember("name"))
@@ -251,8 +257,8 @@ try
     // 执行删除
     XftgDb << "DELETE FROM XFTG_DAYPLAN_PROTECT WHERE NAME = ?;" << dayPlanName;
 
-    dealer_.send(zmq::message_t(deleteSubtitle_), zmq::send_flags::sndmore);
-    dealer_.send(zmq::message_t(), zmq::send_flags::none);
+    // stationDealer->send(zmq::message_t(deleteSubtitle_), zmq::send_flags::sndmore);
+    // stationDealer->send(zmq::message_t(), zmq::send_flags::none);
 
     Json::Value respondContent;
     respondContent["errcode"] = 0;
@@ -267,21 +273,12 @@ catch(const std::exception& e){
 }
 }
 
-void DayPlanProtect::requestCallbackPut(const httplib::Request &req, httplib::Response &res)
+void DayPlanProtect::requestCallbackPut(const httplib::Request &req, httplib::Response &res, shared_ptr<zmq::socket_t> stationDealer)
 {
 try
 {
-    const auto reqbody = miscellaneous::unserializedJson(req.body);
-
-    /* 鉴权 */
-    Json::Value auth;
-    if(!reqbody.isMember("auth"))
-        throw std::runtime_error("request params err");
-    auth = reqbody["auth"];
-    if(!auth.isMember("username") || !auth.isMember("password"))
-        throw std::runtime_error("request params err");
-    if(!UserManager::doAuth(auth["username"].asString(), auth["password"].asString()))
-        throw std::runtime_error("auth failed");
+    const auto reqbody = json_wrapper::deserialize(req.body);
+    const auto usernameAuth = base::UserManager::doAuth(reqbody);
 
     /** 解析业务参数 */
     if(!reqbody.isMember("name") 
@@ -311,7 +308,7 @@ try
     XftgDb << "SELECT COUNT(*) FROM XFTG_DAYPLAN_PROTECT WHERE NAME = ?;"
         << dayPlanName >> recordCount;
     if(recordCount == 0)
-        throw AuthException("记录不存在", auth["username"].asString());
+        throw AuthException("记录不存在", usernameAuth);
 
     XftgDb << "UPDATE XFTG_DAYPLAN_PROTECT SET "
                         "SOC_MAX = ?, SOC_MIN = ?, "
@@ -323,14 +320,15 @@ try
                     << chargePowerMax << dischargePowerMax
                     << dayPlanName;
 
-    dealer_.send(zmq::message_t(putSubtitle_), zmq::send_flags::sndmore);
-    dealer_.send(zmq::message_t(), zmq::send_flags::none);
+    // stationDealer->send(zmq::message_t(putSubtitle_), zmq::send_flags::sndmore);
+    // stationDealer->send(zmq::message_t(), zmq::send_flags::none);
+
     // 保存'成功'操作记录
     const string status = "success";
     const string content{ "success" };
     const string type{ "参数设置" };
-    const string timestamp = miscellaneous::getCurrentTimestamp();
-    const string username = miscellaneous::getCurrentTimestamp();
+    const string timestamp = datetime::getCurrentTimestamp();
+    const string username = datetime::getCurrentTimestamp();
     // OperationRecord::insertRecord(status, content, type, timestamp, username);
 
     // 成功响应
@@ -345,80 +343,6 @@ catch(const std::exception& e){
     msg["errmsg"] = e.what();
     utils::httpRespond(res, msg);
 }
-}
-
-std::string DayPlanProtect::createTable()
-{
-    try
-    {
-        /* code */
-        const string projectPath{ "/opt/paceic_ems_server/main" };
-        const string dbPath{ projectPath + "/db" };
-        BOOST_ASSERT(filesystem::is_directory(dbPath));
-
-        const string filename{ dbPath + "/Xftg.sqlite" };
-        sqlite::database XftgDb(filename);
-
-        XftgDb << "CREATE TABLE IF NOT EXISTS XFTG_DAYPLAN_PROTECT("
-                    "NAME TEXT PRIMARY KEY,"
-                    "SOC_MAX TEXT,"
-                    "SOC_MIN TEXT,"
-                    "TRANSFORMER_POWER_MAX TEXT,"
-                    "POWER_STEP_SIZE TEXT,"
-                    "CHARGE_POWER_MAX TEXT, "
-                    "DISCHARGE_POWER_MAX TEXT);";
-        return filename;
-    }
-    catch(const std::exception& e){
-        std::cerr << e.what() << '\n';
-    }
-    return {};
-}
-
-bool DayPlanProtect::insertIntoDefaultRecord()
-{
-    bool finalResult;
-    try
-    {
-        /* code */
-        const string projectPath{ "/opt/paceic_ems_server/main" };
-        const string dbPath{ projectPath + "/db" };
-        BOOST_ASSERT(filesystem::is_directory(dbPath));
-
-        const string filename{ dbPath + "/Xftg.sqlite" };
-        sqlite::database XftgDb(filename);
-
-        XftgDb << "DELETE FROM XFTG_DAYPLAN_PROTECT;";// clear old records
-
-        XftgDb << "INSERT INTO XFTG_DAYPLAN_PROTECT ("
-                    "NAME, "
-                    "SOC_MAX, SOC_MIN, "
-                    "TRANSFORMER_POWER_MAX, "
-                    "POWER_STEP_SIZE, "
-                    "CHARGE_POWER_MAX, DISCHARGE_POWER_MAX) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?);"
-                << "dayPlanProtect1"
-                << "100%" << "10%"
-                << "100kW" << "5kW"
-                << "25kW" << "15kW";
-
-        XftgDb << "INSERT INTO XFTG_DAYPLAN_PROTECT ("
-                    "NAME, "
-                    "SOC_MAX, SOC_MIN, "
-                    "TRANSFORMER_POWER_MAX, "
-                    "POWER_STEP_SIZE, "
-                    "CHARGE_POWER_MAX, DISCHARGE_POWER_MAX) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?);"
-                << "dayPlanProtect2"
-                << "90%" << "20%"
-                << "50kW" << "1kW"
-                << "20kW" << "30kW";
-        return true;
-    }
-    catch(const std::exception& e){
-        std::cerr << e.what() << '\n';
-    }
-    return {};
 }
 
 std::optional<DayPlanProtect::Record> DayPlanProtect::getRecord(const string& name)

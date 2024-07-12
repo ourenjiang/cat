@@ -1,6 +1,6 @@
 #pragma once
 #include "utils/HttpWrapper.h"
-#include "utils/ZmqRequest.h"
+#include "zmq.hpp"
 #include "ems/station/Model.h"
 
 namespace ems
@@ -8,20 +8,15 @@ namespace ems
 namespace pcs
 {
 using namespace std;
+using namespace httplib;
 
 class Setting
 {
 public:
-    Setting();
-    void respondCallback(std::shared_ptr<StationInfo> stationInfo, zmq::socket_t& router,
-                        const vector<byte>& identity, const vector<byte>& subtitle, const vector<byte>& body) const;
-    vector<byte> identity();
+    void requestCallback(const Request &req, Response &res, shared_ptr<zmq::socket_t> stationDealer);
 private:
-    void registerHttpInterfaces();// 数据发布
-    void requestCallback(const httplib::Request &req, httplib::Response &res);
-
-    const string identity_;
-    zmq::socket_t dealer_;
+    zmq::message_t createMsg(const uint16_t regAddress, const uint16_t regData);
+    void respond(Response& res, const int errcode, const string& errmsg);
 };
 
 }//namespace pcs

@@ -1,39 +1,28 @@
 #pragma once
 #include "utils/HttpWrapper.h"
-#include "utils/ZmqRequest.h"
 #include "ems/station/Model.h"
+#include "zmq.hpp"
 
 namespace ems
 {
 namespace bau
 {
 using namespace std;
+using namespace httplib;
 
 class Setting
 {
 public:
     Setting();
-    void respondCallback(std::shared_ptr<StationInfo> stationInfo, zmq::socket_t& router,
-                        const vector<byte>& identity, const vector<byte>& subtitle, const vector<byte>& body);
-    void respondCallbacPowerOff(std::shared_ptr<StationInfo> stationInfo, zmq::socket_t& router,
-                                const vector<byte>& identity, const vector<byte>& body);
-    void respondCallbacQuickStartup(std::shared_ptr<StationInfo> stationInfo, zmq::socket_t& router,
-                                    const vector<byte>& identity, const vector<byte>& body);
-    void respondCallbacSetBcuRelay(std::shared_ptr<StationInfo> stationInfo, zmq::socket_t& router,
-                                    const vector<byte>& identity, const vector<byte>& body);
-    vector<byte> identity();
+    void requestCallbackPowerOff(const httplib::Request &req, httplib::Response &res,
+                                    shared_ptr<zmq::socket_t> stationDealer);
+    void requestCallbackQuickStartup(const httplib::Request &req, httplib::Response &res,
+                                    shared_ptr<zmq::socket_t> stationDealer);
+    void requestCallbackSetBcuRelay(const httplib::Request &req, httplib::Response &res,
+                                    shared_ptr<zmq::socket_t> stationDealer);
 private:
-    void registerHttpInterfaces();// 数据发布
-    void requestCallbackPowerOff(const httplib::Request &req, httplib::Response &res);
-    void requestCallbackQuickStartup(const httplib::Request &req, httplib::Response &res);
-    void requestCallbackSetBcuRelay(const httplib::Request &req, httplib::Response &res);
-
-    const string identity_;
-    const string powerOffSubtitle_;
-    const string quickStartupSubtitle_;
-    const string setBcuRelaySubtitle_;
-    zmq::socket_t stationDealer_;
-    zmq::socket_t bauDealer_;
+    zmq::message_t createMsg(const uint16_t regAddress, const uint16_t regData);
+    void respond(Response& res, const int errcode, const string& errmsg);
 };
 
 }//namespace bau

@@ -4,498 +4,148 @@
 #include "json/json.h"
 #include "utils/Miscellaneous.h"
 #include "utils/MsgpackWrapper_src.hpp"
-#include "ems/station/OperationRecord.h"
-#include "ems/station/UserManager.h"
+#include "ems/base/UserManager.h"
+#include "ems/base/OperationRecord.h"
+#include "utils/datetime.h"
+#include "utils/ModbusRtu.h"
+#include "utils/jsonWrapper.h"
 
 using namespace ems;
 using namespace ems::bau;
 
 Setting::Setting()
-    : bauDealer_(miscellaneous::createZmqSocket(zmq::socket_type::dealer))
-    , stationDealer_(miscellaneous::createZmqSocket(zmq::socket_type::dealer))
-    , identity_("BauSetting")
-    , powerOffSubtitle_("PowerOff")
-    , quickStartupSubtitle_("Startup")
-    , setBcuRelaySubtitle_("SetBcuRelay")
 {
-    registerHttpInterfaces();
-    stationDealer_.set(zmq::sockopt::routing_id, identity_);
-    stationDealer_.connect("tcp://127.0.0.1:6200");
-
-    {
-        auto& cfgRoot = YamlcppWrapper::getRoot();
-        const auto& collectors = cfgRoot["collector"];
-        auto resultLoad = std::find_if(collectors.begin(), collectors.end(), [](const YAML::Node& item){
-            return item["name"].as<string>() == "BAU";
-        });
-        BOOST_ASSERT(resultLoad != collectors.end());
-        BOOST_ASSERT((*resultLoad)["load"].as<bool>());
-
-        const string proxyAddress = (*resultLoad)["master"]["address"].as<string>();
-        bauDealer_.connect(proxyAddress);
-    }
 }
 
-vector<byte> Setting::identity()
-{
-    const auto beginItr = reinterpret_cast<const byte*>(identity_.data());
-    return { beginItr, beginItr + identity_.size() };
-}
-
-void Setting::registerHttpInterfaces()
-{
-    using namespace std::placeholders;
-    auto& serv = utils::getHttpServerSingleton();
-    serv.Post("/bau/powerOff", httplib::Server::Handler(bind(&Setting::requestCallbackPowerOff, this, _1, _2)));
-    serv.Post("/bau/quickStartup", httplib::Server::Handler(bind(&Setting::requestCallbackQuickStartup, this, _1, _2)));
-    serv.Put("/bau/setBcuRelay", httplib::Server::Handler(bind(&Setting::requestCallbackSetBcuRelay, this, _1, _2)));
-}
-
-void Setting::respondCallback(std::shared_ptr<StationInfo> stationInfo, zmq::socket_t& router,
-                        const vector<byte>& identity, const vector<byte>& subtitle, const vector<byte>& body)
+void Setting::requestCallbackPowerOff(const httplib::Request &req, httplib::Response &res,
+                                        shared_ptr<zmq::socket_t> stationDealer)
 {
 try
 {
-    const string subtitleString(reinterpret_cast<const char*>(subtitle.data()),
-        reinterpret_cast<const char*>(subtitle.data()) + subtitle.size());
-    BOOST_ASSERT(subtitleString == powerOffSubtitle_
-                    || subtitleString == quickStartupSubtitle_ || subtitleString == setBcuRelaySubtitle_);
-    if(subtitleString == powerOffSubtitle_){
-        string requestMsg;
-        msgpackWrapper::unpack(body.data(), body.size(), requestMsg);
-        const int branchIndex = std::stoi(requestMsg);
-        auto& branchList = stationInfo->branchList;
-        auto branchItr = branchList.find(branchIndex);
-        if(branchItr == branchList.end())
-            throw std::runtime_error("branch not exist");
-    }
-    
+    const auto body = json_wrapper::deserialize(req.body);
+    const string usernameAuth = base::UserManager::doAuth(body);/* 鉴权 */
+    const string branchIndex = base::UserManager::getParam(body, "branchIndex");
 
+    // 请求
+    stationDealer->send(zmq::message_t(string("BAU0")), zmq::send_flags::sndmore);// devId
+    stationDealer->send(zmq::message_t(string("Interface")), zmq::send_flags::sndmore);// return id
+    stationDealer->send(createMsg(0xd700, 0), zmq::send_flags::none);
+    // 响应
+    zmq::message_t deviceBody;
+    (void)stationDealer->recv(deviceBody);
 
-    {
-        const pair<bool, vector<byte>> repbody{ true, {} };
-        const msgpack::sbuffer repbodySerialized = msgpackWrapper::pack(repbody);
-
-        zmq::message_t identitymsg(identity.data(), identity.size());
-        zmq::message_t repmsg(repbodySerialized.data(), repbodySerialized.size());
-        router.send(identitymsg, zmq::send_flags::sndmore);
-        router.send(repmsg, zmq::send_flags::none);
-    }
-}
-catch(const std::exception& e){
-    const vector<byte> repcontent = miscellaneous::convertStringToBytes(e.what());
-    const pair<bool, vector<byte>> repbody{ false, repcontent };
-    const msgpack::sbuffer repbodySerialized = msgpackWrapper::pack(repbody);
-
-    zmq::message_t identitymsg(identity.data(), identity.size());
-    zmq::message_t repmsg(repbodySerialized.data(), repbodySerialized.size());
-    router.send(identitymsg, zmq::send_flags::sndmore);
-    router.send(repmsg, zmq::send_flags::none);
-}
-}
-
-void Setting::respondCallbacPowerOff(std::shared_ptr<StationInfo> stationInfo, zmq::socket_t& router, const vector<byte>& identity, const vector<byte>& body)
-{
-try
-{
-    string requestMsg;
-    const bool unpackResult = msgpackWrapper::unpack(body.data(), body.size(), requestMsg);
-    const string branchIndex = requestMsg;
-
-    // 先检查分支、簇的状态
-    auto& branchList = stationInfo->branchList;
-    auto branchItr = branchList.find(std::stoi(branchIndex));
-    if(branchItr == branchList.end()) throw std::runtime_error("branch not exist");
-
-    // 准备Modbus请求帧:
-    // 0xd700  掉电关机   固定0
-    // 0xd701  一键并机   固定0
-    // 0xd702  簇分离     簇下标从1开始，0代表所有
-    // 0xd703  簇合并     簇下标从1开始，0代表所有
-    uint16_t regAddress{ 0xd700 };
-    uint16_t regData{ 0 };
-    auto reqmsg = miscellaneous::createModbusRtuWriteFrame(0x01, 0x06, regAddress, regData);
-
-    zmq::message_t sndmsg(reqmsg.data(), reqmsg.size());
-    bauDealer_.send(sndmsg, zmq::send_flags::none);
-
-    zmq::pollitem_t item{ bauDealer_, 0, ZMQ_POLLIN, 0 };
-    const int pollResult = zmq::poll(&item, 1, std::chrono::seconds(1));
-    BOOST_ASSERT(pollResult == 0 || pollResult == 1);
-    if(pollResult == 0)
-        throw std::runtime_error("zmq recv failed");
-
-    zmq::message_t rcvmsg;
-    (void)bauDealer_.recv(rcvmsg);
-    const vector<uint8_t> repmsg(reinterpret_cast<uint8_t*>(rcvmsg.data()),
-                            reinterpret_cast<uint8_t*>(rcvmsg.data()) + rcvmsg.size());
-    if(reqmsg != repmsg)
-        throw std::runtime_error("recv frame err");
-
-    // 返回结果
-    {
-        const vector<byte> repcontent = miscellaneous::convertStringToBytes("success");
-        const pair<bool, vector<byte>> repbody{ true, repcontent };
-        const msgpack::sbuffer repbodySerialized = msgpackWrapper::pack(repbody);
-
-        zmq::message_t identitymsg(identity.data(), identity.size());
-        zmq::message_t repmsg(repbodySerialized.data(), repbodySerialized.size());
-        router.send(identitymsg, zmq::send_flags::sndmore);
-        router.send(repmsg, zmq::send_flags::none);
-    }
-}
-catch(const std::exception& e){
-    const vector<byte> repcontent = miscellaneous::convertStringToBytes(e.what());
-    const pair<bool, vector<byte>> repbody{ false, repcontent };
-    const msgpack::sbuffer repbodySerialized = msgpackWrapper::pack(repbody);
-
-    zmq::message_t identitymsg(identity.data(), identity.size());
-    zmq::message_t repmsg(repbodySerialized.data(), repbodySerialized.size());
-    router.send(identitymsg, zmq::send_flags::sndmore);
-    router.send(repmsg, zmq::send_flags::none);
-}
-}
-
-void Setting::respondCallbacQuickStartup(std::shared_ptr<StationInfo> stationInfo, zmq::socket_t& router, const vector<byte>& identity, const vector<byte>& body)
-{
-try
-{
-    string requestMsg;
-    const bool unpackResult = msgpackWrapper::unpack(body.data(), body.size(), requestMsg);
-    const string branchIndex = requestMsg;
-    
-    // 先检查分支、簇的状态
-    auto& branchList = stationInfo->branchList;
-    auto branchItr = branchList.find(std::stoi(branchIndex));
-    if(branchItr == branchList.end()) throw std::runtime_error("branch not exist");
-
-    // 准备Modbus请求帧:
-    // 0xd700  掉电关机   固定0
-    // 0xd701  一键并机   固定0
-    // 0xd702  簇分离     簇下标从1开始，0代表所有
-    // 0xd703  簇合并     簇下标从1开始，0代表所有
-    uint16_t regAddress{ 0xd701 };
-    uint16_t regData{ 0 };
-    auto reqmsg = miscellaneous::createModbusRtuWriteFrame(0x01, 0x06, regAddress, regData);
-
-    zmq::message_t sndmsg(reqmsg.data(), reqmsg.size());
-    bauDealer_.send(sndmsg, zmq::send_flags::none);
-
-    zmq::pollitem_t item{ bauDealer_, 0, ZMQ_POLLIN, 0 };
-    const int pollResult = zmq::poll(&item, 1, std::chrono::seconds(1));
-    BOOST_ASSERT(pollResult == 0 || pollResult == 1);
-    if(pollResult == 0)
-        throw std::runtime_error("zmq recv failed");
-
-    zmq::message_t rcvmsg;
-    (void)bauDealer_.recv(rcvmsg);
-    const vector<uint8_t> repmsg(reinterpret_cast<uint8_t*>(rcvmsg.data()),
-                            reinterpret_cast<uint8_t*>(rcvmsg.data()) + rcvmsg.size());
-    if(reqmsg != repmsg)
-        throw std::runtime_error("recv frame err");
-
-    // 返回结果
-    {
-        const vector<byte> repcontent = miscellaneous::convertStringToBytes("success");
-        const pair<bool, vector<byte>> repbody{ true, repcontent };
-        const msgpack::sbuffer repbodySerialized = msgpackWrapper::pack(repbody);
-
-        zmq::message_t identitymsg(identity.data(), identity.size());
-        zmq::message_t repmsg(repbodySerialized.data(), repbodySerialized.size());
-        router.send(identitymsg, zmq::send_flags::sndmore);
-        router.send(repmsg, zmq::send_flags::none);
-    }
-}
-catch(const std::exception& e){
-    const vector<byte> repcontent = miscellaneous::convertStringToBytes(e.what());
-    const pair<bool, vector<byte>> repbody{ false, repcontent };
-    const msgpack::sbuffer repbodySerialized = msgpackWrapper::pack(repbody);
-
-    zmq::message_t identitymsg(identity.data(), identity.size());
-    zmq::message_t repmsg(repbodySerialized.data(), repbodySerialized.size());
-    router.send(identitymsg, zmq::send_flags::sndmore);
-    router.send(repmsg, zmq::send_flags::none);
-}
-}
-
-void Setting::respondCallbacSetBcuRelay(std::shared_ptr<StationInfo> stationInfo, zmq::socket_t& router,
-                                        const vector<byte>& identity, const vector<byte>& body)
-{
-try
-{
-    tuple<string, string, string> requestMsg;
-    const bool unpackResult = msgpackWrapper::unpack(body.data(), body.size(), requestMsg);
-    auto& [branchIndex, bcuIndex, status] = requestMsg;
-
-    // 先检查分支、簇的状态
-    auto& branchList = stationInfo->branchList;
-    auto branchItr = branchList.find(std::stoi(branchIndex));
-    if(branchItr == branchList.end()) throw std::runtime_error("branch not exist");
-    auto& branchInfo = branchItr->second;
-    auto& bauInfo = branchInfo->bauInfo;
-    auto& bcuList = bauInfo.bcuList;
-    auto bcuItr = bcuList.find(std::stoi(bcuIndex));
-    if(bcuItr == bcuList.end()) throw std::runtime_error("bcu not exist");
-
-    // 准备Modbus请求帧:
-    // 0xd701  一键并机   固定0
-    // 0xd702  簇分离     簇下标从1开始，0代表所有
-    // 0xd703  簇合并     簇下标从1开始，0代表所有
-    uint16_t regAddress{ 0 };
-    if(status == "on") regAddress = 0xd703;
-    if(status == "off") regAddress = 0xd702;
-    uint16_t regData{ 0 };
-    auto reqmsg = miscellaneous::createModbusRtuWriteFrame(0x01, 0x06, regAddress, regData);
-
-    zmq::message_t sndmsg(reqmsg.data(), reqmsg.size());
-    bauDealer_.send(sndmsg, zmq::send_flags::none);
-
-    zmq::pollitem_t item{ bauDealer_, 0, ZMQ_POLLIN, 0 };
-    const int pollResult = zmq::poll(&item, 1, std::chrono::seconds(1));
-    BOOST_ASSERT(pollResult == 0 || pollResult == 1);
-    if(pollResult == 0)
-        throw std::runtime_error("zmq recv failed");
-
-    zmq::message_t rcvmsg;
-    (void)bauDealer_.recv(rcvmsg);
-    const vector<uint8_t> repmsg(reinterpret_cast<uint8_t*>(rcvmsg.data()),
-                            reinterpret_cast<uint8_t*>(rcvmsg.data()) + rcvmsg.size());
-    if(reqmsg != repmsg)
-        throw std::runtime_error("recv frame err");
-
-    {
-        const vector<byte> repcontent = miscellaneous::convertStringToBytes("success");
-        const pair<bool, vector<byte>> repbody{ true, repcontent };
-        const msgpack::sbuffer repbodySerialized = msgpackWrapper::pack(repbody);
-
-        zmq::message_t identitymsg(identity.data(), identity.size());
-        zmq::message_t repmsg(repbodySerialized.data(), repbodySerialized.size());
-        router.send(identitymsg, zmq::send_flags::sndmore);
-        router.send(repmsg, zmq::send_flags::none);
-    }
-}
-catch(const std::exception& e){
-    const vector<byte> repcontent = miscellaneous::convertStringToBytes(e.what());
-    const pair<bool, vector<byte>> repbody{ false, repcontent };
-    const msgpack::sbuffer repbodySerialized = msgpackWrapper::pack(repbody);
-
-    zmq::message_t identitymsg(identity.data(), identity.size());
-    zmq::message_t repmsg(repbodySerialized.data(), repbodySerialized.size());
-    router.send(identitymsg, zmq::send_flags::sndmore);
-    router.send(repmsg, zmq::send_flags::none);
-}
-}
-
-
-void Setting::requestCallbackPowerOff(const httplib::Request &req, httplib::Response &res)
-{
-try
-{
-    const auto reqbody = miscellaneous::unserializedJson(req.body);
-
-    /* 鉴权 */
-    Json::Value auth;
-    if(!reqbody.isMember("auth"))
-        throw std::runtime_error("request params err");
-    auth = reqbody["auth"];
-    if(!auth.isMember("username") || !auth.isMember("password"))
-        throw std::runtime_error("request params err");
-    const string usernameAuth = auth["username"].asString();
-    const string passwordAuth = auth["password"].asString();
-    if(!UserManager::doAuth(usernameAuth, passwordAuth))
-        throw std::runtime_error("auth failed");
-
-    /** 解析业务参数 */
-    if(!reqbody.isMember("branchIndex"))
-        throw std::runtime_error("request params err");
-    string workParams{ reqbody["branchIndex"].asString() };
-    auto serializedMsg = msgpackWrapper::pack(workParams);
-    
-    zmq::message_t sndmsg(serializedMsg.data(), serializedMsg.size());
-    stationDealer_.send(zmq::message_t(powerOffSubtitle_), zmq::send_flags::sndmore);//empty
-    stationDealer_.send(sndmsg, zmq::send_flags::none);
-    // 接收消息
-    zmq::message_t rcvmsg;
-    (void)stationDealer_.recv(rcvmsg);
-
-    // 先解析标准的响应消息
-    pair<bool, vector<byte>> respondMsg;
-    const bool unpackMsgResult = msgpackWrapper::unpack(rcvmsg.data(), rcvmsg.size(), respondMsg);
+    // 解析消息
+    pair<bool, vector<uint8_t>> respondMsg;
+    const bool unpackMsgResult = msgpackWrapper::unpack(deviceBody.data(), deviceBody.size(), respondMsg);
     BOOST_ASSERT(unpackMsgResult);
     const auto& [returnStatus, returnContent] = respondMsg;
-    if(!returnStatus){
-        // 再解析自定义的响应内容
-        const string errmsg(reinterpret_cast<const char*>(returnContent.data()),
-                                    reinterpret_cast<const char*>(returnContent.data()) + returnContent.size());
-        throw std::runtime_error(errmsg);
-    }
-
-    // 保存'成功'操作记录
-    OperationRecord::insertRecord("success", "BAU关机", "参数设置", usernameAuth);
-
-    // 成功响应
-    Json::Value repJson;
-    repJson["errcode"] = 0;
-    repJson["errmsg"] = "success";
-    utils::httpRespond(res, repJson);
+    if(!returnStatus)
+        throw std::runtime_error("modbus respond failed");
+    base::OperationRecord::insertRecord("success", "BAU关机", "参数设置", usernameAuth);
+    respond(res, 0, "success");
 }
 catch(const std::exception& e){
-    
-    // 保存'失败'操作记录
-    OperationRecord::insertRecord("failed", e.what(), "参数设置", "username");
-
-    Json::Value respondmsg;
-    respondmsg["errcode"] = -1;
-    respondmsg["errmsg"] = e.what();
-    utils::httpRespond(res, respondmsg);
+    base::OperationRecord::insertRecord("failed", e.what(), "参数设置", "username");
+    respond(res, -1, e.what());
 }
 }
 
-void Setting::requestCallbackQuickStartup(const httplib::Request &req, httplib::Response &res)
+void Setting::requestCallbackQuickStartup(const httplib::Request &req, httplib::Response &res, shared_ptr<zmq::socket_t> stationDealer)
 {
 try
 {
-    const auto reqbody = miscellaneous::unserializedJson(req.body);
+    const auto body = json_wrapper::deserialize(req.body);
+    const string usernameAuth = base::UserManager::doAuth(body);/* 鉴权 */
+    const string branchIndex = base::UserManager::getParam(body, "branchIndex");
 
-    /* 鉴权 */
-    Json::Value auth;
-    if(!reqbody.isMember("auth"))
-        throw std::runtime_error("request params err");
-    auth = reqbody["auth"];
-    if(!auth.isMember("username") || !auth.isMember("password"))
-        throw std::runtime_error("request params err");
-    const string usernameAuth = auth["username"].asString();
-    const string passwordAuth = auth["password"].asString();
-    if(!UserManager::doAuth(usernameAuth, passwordAuth))
-        throw std::runtime_error("auth failed");
+    // 请求
+    stationDealer->send(zmq::message_t(), zmq::send_flags::sndmore);// Topic
+    stationDealer->send(zmq::message_t(string("BAU0")), zmq::send_flags::sndmore);// devId
+    stationDealer->send(zmq::message_t(string("Interface")), zmq::send_flags::sndmore);// return id
+    stationDealer->send(createMsg(0xd701, 0), zmq::send_flags::none);
+    // 响应
+    zmq::message_t deviceBody;
+    (void)stationDealer->recv(deviceBody);
 
-    /** 解析业务参数 */
-    if(!reqbody.isMember("branchIndex"))
-        throw std::runtime_error("request params err");
-    string workParams{ reqbody["branchIndex"].asString() };
-    auto serializedMsg = msgpackWrapper::pack(workParams);
-    
-    zmq::message_t sndmsg(serializedMsg.data(), serializedMsg.size());
-    stationDealer_.send(zmq::message_t(quickStartupSubtitle_), zmq::send_flags::sndmore);//empty
-    stationDealer_.send(sndmsg, zmq::send_flags::none);
-    // 接收消息
-    zmq::message_t rcvmsg;
-    (void)stationDealer_.recv(rcvmsg);
-
-    // 先解析标准的响应消息
-    pair<bool, vector<byte>> respondMsg;
-    const bool unpackMsgResult = msgpackWrapper::unpack(rcvmsg.data(), rcvmsg.size(), respondMsg);
+    // 解析消息
+    pair<bool, vector<uint8_t>> respondMsg;
+    const bool unpackMsgResult = msgpackWrapper::unpack(deviceBody.data(), deviceBody.size(), respondMsg);
     BOOST_ASSERT(unpackMsgResult);
     const auto& [returnStatus, returnContent] = respondMsg;
-    if(!returnStatus){
-        // 再解析自定义的响应内容
-        const string errmsg(reinterpret_cast<const char*>(returnContent.data()),
-                                    reinterpret_cast<const char*>(returnContent.data()) + returnContent.size());
-        throw std::runtime_error(errmsg);
-    }
-
-    // 保存'成功'操作记录
-    const string status = "success";
-    const string content{ "success" };
-    const string type{ "参数设置" };
-    const string timestamp = miscellaneous::getCurrentTimestamp();
-    const string username = miscellaneous::getCurrentTimestamp();
-    OperationRecord::insertRecord("success", "success", "参数设置", usernameAuth);
-
-    // 成功响应
-    Json::Value repJson;
-    repJson["errcode"] = 0;
-    repJson["errmsg"] = "success";
-    utils::httpRespond(res, repJson);
+    if(!returnStatus)
+        throw std::runtime_error("modbus respond failed");
+    base::OperationRecord::insertRecord("success", "BAU一键并机", "参数设置", usernameAuth);
+    respond(res, 0, "success");
 }
 catch(const std::exception& e){
-    const string status = "failed";
-    const string content{ e.what() };
-    const string type{ "参数设置" };
-    const string timestamp = miscellaneous::getCurrentTimestamp();
-    const string username = miscellaneous::getCurrentTimestamp();
-    // OperationRecord::insertRecord(status, content, type, timestamp, username);
-
-    Json::Value respondmsg;
-    respondmsg["errcode"] = -1;
-    respondmsg["errmsg"] = e.what();
-    utils::httpRespond(res, respondmsg);
+    base::OperationRecord::insertRecord("failed", e.what(), "BAU一键并机", "username");
+    respond(res, -1, e.what());
 }
 }
 
-void Setting::requestCallbackSetBcuRelay(const httplib::Request &req, httplib::Response &res)
+void Setting::requestCallbackSetBcuRelay(const httplib::Request &req, httplib::Response &res, shared_ptr<zmq::socket_t> stationDealer)
 {
 try
 {
-    const auto reqbody = miscellaneous::unserializedJson(req.body);
-
-    /* 鉴权 */
-    Json::Value auth;
-    if(!reqbody.isMember("auth"))
-        throw std::runtime_error("request params err");
-    auth = reqbody["auth"];
-    if(!auth.isMember("username") || !auth.isMember("password"))
-        throw std::runtime_error("request params err");
-    if(!UserManager::doAuth(auth["username"].asString(), auth["password"].asString()))
-        throw std::runtime_error("auth failed");
-
-    /** 解析业务参数 */
-    if(!reqbody.isMember("branchIndex")
-        || !reqbody.isMember("bcuIndex") || !reqbody.isMember("status") )
-        throw std::runtime_error("request params err");
-    const string branchIndex = reqbody["branchIndex"].asString();
-    const string bcuIndex = reqbody["bcuIndex"].asString();
-    const string status = reqbody["status"].asString();
+    const auto body = json_wrapper::deserialize(req.body);
+    const string usernameAuth = base::UserManager::doAuth(body);/* 鉴权 */
+    const string branchIndex = base::UserManager::getParam(body, "branchIndex");
+    optional<string> bcuIndex;
+    if(body.isMember("bcuIndex")){
+        bcuIndex = base::UserManager::getParam(body, "bcuIndex");
+    }
+    const string status = base::UserManager::getParam(body, "status");
     if(status != "on" && status != "off")
         throw std::runtime_error("request params err");
-    tuple<string, string, string> workParams{ branchIndex, bcuIndex, status };
-    auto serializedMsg = msgpackWrapper::pack(workParams);
+    
+    // 请求
+    stationDealer->send(zmq::message_t(string("BAU0")), zmq::send_flags::sndmore);// devId
+    stationDealer->send(zmq::message_t(string("Interface")), zmq::send_flags::sndmore);// return id
+    
+    // 准备Modbus请求帧:
+    // 0xd701  一键并机   固定0
+    // 0xd702  簇分离     簇下标从1开始，0代表所有
+    // 0xd703  簇合并     簇下标从1开始，0代表所有
+    const uint16_t regAddress = (status == "on") ? 0xd703 : 0xd702;
+    uint16_t regData = 0;// 代表所有BCU
+    if(bcuIndex.has_value()){
+        const string bcuIndexStr = bcuIndex.value();
+        uint16_t value = static_cast<uint16_t>(std::stoi(bcuIndexStr));
+        regData = value + 1;// 下标 + 1
+    }
+    stationDealer->send(createMsg(regAddress, regData), zmq::send_flags::none);
+    // 响应
+    zmq::message_t srcIdentity;
+    zmq::message_t deviceBody;
+    (void)stationDealer->recv(srcIdentity);
+    (void)stationDealer->recv(deviceBody);
 
-    // 准备请求消息
-    zmq::message_t sndmsg(serializedMsg.data(), serializedMsg.size());
-    stationDealer_.send(zmq::message_t(setBcuRelaySubtitle_), zmq::send_flags::sndmore);//empty
-    stationDealer_.send(sndmsg, zmq::send_flags::none);
-    // 接收消息
-    zmq::message_t rcvmsg;
-    (void)stationDealer_.recv(rcvmsg);
-
-    // 先解析标准的响应消息
-    pair<bool, vector<byte>> respondMsg;
-    const bool unpackMsgResult = msgpackWrapper::unpack(rcvmsg.data(), rcvmsg.size(), respondMsg);
+    // 解析消息
+    pair<bool, vector<uint8_t>> respondMsg;
+    const bool unpackMsgResult = msgpackWrapper::unpack(deviceBody.data(), deviceBody.size(), respondMsg);
     BOOST_ASSERT(unpackMsgResult);
     const auto& [returnStatus, returnContent] = respondMsg;
-    if(!returnStatus){
-        // 再解析自定义的响应内容
-        const string errmsg(reinterpret_cast<const char*>(returnContent.data()),
-                                    reinterpret_cast<const char*>(returnContent.data()) + returnContent.size());
-        throw std::runtime_error(errmsg);
-    }
-
-    // 保存'成功'操作记录
-    // const string status = "success";
-    // const string content{ "success" };
-    // const string type{ "参数设置" };
-    // const string timestamp = miscellaneous::getCurrentTimestamp();
-    // const string username = miscellaneous::getCurrentTimestamp();
-    // OperationRecord::insertRecord(status, content, type, timestamp, username);
-
-    // 成功响应
-    Json::Value repJson;
-    repJson["errcode"] = 0;
-    repJson["errmsg"] = "success";
-    utils::httpRespond(res, repJson);
+    if(!returnStatus)
+        throw std::runtime_error("modbus respond failed");
+    base::OperationRecord::insertRecord("success", "设置簇继电器", "参数设置", usernameAuth);
+    respond(res, 0, "success");
 }
 catch(const std::exception& e){
-    const string status = "failed";
-    const string content{ e.what() };
-    const string type{ "参数设置" };
-    const string timestamp = miscellaneous::getCurrentTimestamp();
-    const string username = miscellaneous::getCurrentTimestamp();
-    // OperationRecord::insertRecord(status, content, type, timestamp, username);
-
-    Json::Value respondmsg;
-    respondmsg["errcode"] = -1;
-    respondmsg["errmsg"] = e.what();
-    utils::httpRespond(res, respondmsg);
+    base::OperationRecord::insertRecord("failed", e.what(), "设置簇继电器", "username");
+    respond(res, -1, e.what());
 }
+}
+
+zmq::message_t Setting::createMsg(const uint16_t regAddress, const uint16_t regData)
+{
+    auto reqmsg = modbus::modbusRtuWriteFrame(0x01, 0x06, regAddress, regData);
+    return { reqmsg.data(), reqmsg.size() };
+}
+
+void Setting::respond(Response& res, const int errcode, const string& errmsg)
+{
+    Json::Value root;
+    root["errcode"] = errcode;
+    root["errmsg"] = errmsg;
+    utils::httpRespond(res, root);
 }

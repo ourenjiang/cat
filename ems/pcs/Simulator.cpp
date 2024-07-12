@@ -1,6 +1,8 @@
 #include "Simulator.h"
 #include "utils/Miscellaneous.h"
 #include <cstring>
+#include "utils/crc16.h"
+#include "utils/endian.h"
 
 using namespace ems::pcs;
 
@@ -19,15 +21,15 @@ void Simulator::create_0406_0460()
     {
         uint16_t* registerAddrPtr = reinterpret_cast<uint16_t*>(&requestFrame[2]);
         *registerAddrPtr = 0x0406;
-        miscellaneous::reverseByteArray(registerAddrPtr, sizeof(uint16_t));
+        endian::reverseByteArray(registerAddrPtr, sizeof(uint16_t));
     }
     {
         uint16_t* registerNumPtr = reinterpret_cast<uint16_t*>(&requestFrame[4]);
         *registerNumPtr = 0x0460 - 0x0406 + 1;
-        miscellaneous::reverseByteArray(registerNumPtr, sizeof(uint16_t));
+        endian::reverseByteArray(registerNumPtr, sizeof(uint16_t));
     }
     {
-        uint16_t crc16Modbus = miscellaneous::getCrc16Modbus(requestFrame.data(), 6);
+        uint16_t crc16Modbus = modbus::crc16_manual(requestFrame.data(), 6);
         std::memcpy(&requestFrame[6], &crc16Modbus, sizeof(uint16_t));
     }
 
@@ -37,7 +39,7 @@ void Simulator::create_0406_0460()
     respondFrame[1] = 0x03;
     respondFrame[2] = 2 + sizeof(uint16_t) * (0x0460 - 0x0406 + 1);
     {
-        uint16_t crc16Modbus = miscellaneous::getCrc16Modbus(respondFrame.data(), 
+        uint16_t crc16Modbus = modbus::crc16_manual(respondFrame.data(), 
                                                                 respondFrame.size() - sizeof(uint16_t));
         uint8_t *crc16Ptr = respondFrame.data() + respondFrame.size() - sizeof(uint16_t);
         std::memcpy(crc16Ptr, &crc16Modbus, sizeof(uint16_t));
@@ -56,15 +58,15 @@ void Simulator::create_0474_04D0()
     {
         uint16_t* registerAddrPtr = reinterpret_cast<uint16_t*>(&requestFrame[2]);
         *registerAddrPtr = 0x0474;
-        miscellaneous::reverseByteArray(registerAddrPtr, sizeof(uint16_t));
+        endian::reverseByteArray(registerAddrPtr, sizeof(uint16_t));
     }
     {
         uint16_t* registerNumPtr = reinterpret_cast<uint16_t*>(&requestFrame[4]);
         *registerNumPtr = 0x04D0 - 0x0474 + 1;
-        miscellaneous::reverseByteArray(registerNumPtr, sizeof(uint16_t));
+        endian::reverseByteArray(registerNumPtr, sizeof(uint16_t));
     }
     {
-        uint16_t crc16Modbus = miscellaneous::getCrc16Modbus(requestFrame.data(), 6);
+        uint16_t crc16Modbus = modbus::crc16_manual(requestFrame.data(), 6);
         std::memcpy(&requestFrame[6], &crc16Modbus, sizeof(uint16_t));
     }
 
@@ -74,7 +76,7 @@ void Simulator::create_0474_04D0()
     respondFrame[1] = 0x03;
     respondFrame[2] = 2 + sizeof(uint16_t) * (0x04D0 - 0x0474 + 1);
     {
-        uint16_t crc16Modbus = miscellaneous::getCrc16Modbus(respondFrame.data(), 
+        uint16_t crc16Modbus = modbus::crc16_manual(respondFrame.data(), 
                                                                 respondFrame.size() - sizeof(uint16_t));
         uint8_t *crc16Ptr = respondFrame.data() + respondFrame.size() - sizeof(uint16_t);
         std::memcpy(crc16Ptr, &crc16Modbus, sizeof(uint16_t));

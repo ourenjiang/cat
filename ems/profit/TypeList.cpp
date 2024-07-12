@@ -5,59 +5,111 @@
 #include "json/json.h"
 #include "utils/Miscellaneous.h"
 #include "utils/MsgpackWrapper_src.hpp"
-#include "ems/station/OperationRecord.h"
+#include "ems/interface/OperationRecord.h"
+#include "ems/base/UserManager.h"
 #include "utils/AuthException.h"
-#include "ems/station/UserManager.h"
+#include "utils/datetime.h"
+#include "utils/jsonWrapper.h"
 
 using namespace ems;
 using namespace ems::electricity_price;
 
-TypeList::TypeList()
-    : identity_("ElectricityPriceTypeList")
-    , dealer_(miscellaneous::createZmqSocket(zmq::socket_type::dealer))
-{
-    createTable();
-    insertIntoDefaultRecord();
-    registerHttpInterfaces();
-
-    dealer_.set(zmq::sockopt::routing_id, identity_);
-    dealer_.connect("tcp://127.0.0.1:6200");
-}
-
-vector<byte> TypeList::identity()
-{
-    const auto beginItr = reinterpret_cast<const byte*>(identity_.data());
-    return { beginItr, beginItr + identity_.size() };
-}
-
-void TypeList::registerHttpInterfaces()
-{
-    using namespace std::placeholders;
-    auto& serv = utils::getHttpServerSingleton();
-    serv.Post("/xftg/electricityPrice/typeList", httplib::Server::Handler(bind(&TypeList::requestCallbackPost, this, _1, _2)));
-    serv.Put("/xftg/electricityPrice/typeList", httplib::Server::Handler(bind(&TypeList::requestCallbackPut, this, _1, _2)));
-    serv.Get("/xftg/electricityPrice/typeList", httplib::Server::Handler(bind(&TypeList::requestCallbackGet, this, _1, _2)));
-    serv.Get("/xftg/electricityPrice/typeList/namelist", httplib::Server::Handler(bind(&TypeList::requestCallbackGetNameList, this, _1, _2)));
-    serv.Delete("/xftg/electricityPrice/typeList", httplib::Server::Handler(bind(&TypeList::requestCallbackDelete, this, _1, _2)));
-}
-
-void TypeList::requestCallbackPost(const httplib::Request &req, httplib::Response &res)
+void TypeList::createTable()
 {
 try
 {
-    const auto reqbody = miscellaneous::unserializedJson(req.body);
+    const string projectPath{ "/opt/paceic_ems_server/main" };
+    const string dbPath{ projectPath + "/db" };
+    BOOST_ASSERT(filesystem::is_directory(dbPath));
 
-    /* 鉴权 */
-    Json::Value auth;
-    if(!reqbody.isMember("auth"))
-        throw std::runtime_error("request params err");
-    auth = reqbody["auth"];
-    if(!auth.isMember("username") || !auth.isMember("password"))
-        throw std::runtime_error("request params err");
-    const string usernameAuth = auth["username"].asString();
-    const string passwordAuth = auth["password"].asString();
-    if(!UserManager::doAuth(usernameAuth, passwordAuth))
-        throw std::runtime_error("auth failed");
+    const string filename{ dbPath + "/ElectricityPrice.sqlite" };
+    sqlite::database ElectricityPriceDb(filename);
+
+    /**
+     * 后期优化注解：
+     *      1, 拼接列定义时，可以先使用vector将其缓存，然后再与SQL语句进行组合
+     *      2, jian_input等列实际业务数据类型应为浮点类型，当前原型开发阶段暂时统一为字符串类型
+     *      3, ...
+    */
+    ElectricityPriceDb << "CREATE TABLE IF NOT EXISTS ELECTRICITY_PRICE_TYPELIST("
+                            "NAME TEXT PRIMARY KEY,"
+                            "JIAN_INPUT TEXT,"
+                            "JIAN_OUTPUT TEXT,"
+                            "FENG_INPUT TEXT,"
+                            "FENG_OUTPUT TEXT,"
+                            "PING_INPUT TEXT,"
+                            "PING_OUTPUT TEXT,"
+                            "GU_INPUT TEXT,"
+                            "GU_OUTPUT TEXT)";
+}
+catch(const std::exception& e)
+{
+    std::cerr << e.what() << '\n';
+}
+}
+
+void TypeList::insertIntoDefaultRecord()
+{
+try
+{
+    /* code */
+    const string projectPath{ "/opt/paceic_ems_server/main" };
+    const string dbPath{ projectPath + "/db" };
+    BOOST_ASSERT(filesystem::is_directory(dbPath));
+
+    const string filename{ dbPath + "/ElectricityPrice.sqlite" };
+    sqlite::database ElectricityPriceDb(filename);
+
+    {
+        int recordCount{0};
+        ElectricityPriceDb << "SELECT COUNT(*) FROM ELECTRICITY_PRICE_TYPELIST WHERE NAME = ?;"
+                            << "typeList1" >> recordCount;
+        if(recordCount == 0){
+            ElectricityPriceDb << "INSERT INTO ELECTRICITY_PRICE_TYPELIST ("
+                                    "NAME, "
+                                    "JIAN_INPUT, JIAN_OUTPUT, "
+                                    "FENG_INPUT, FENG_OUTPUT, "
+                                    "PING_INPUT, PING_OUTPUT, "
+                                    "GU_INPUT, GU_OUTPUT) "
+                                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);"
+                                    << "typeList1"
+                                    << "1.400" << "1.400"
+                                    << "1.300" << "1.300"
+                                    << "1.200" << "1.200"
+                                    << "1.100" << "1.100";
+        }
+    }
+    {
+        int recordCount{0};
+        ElectricityPriceDb << "SELECT COUNT(*) FROM ELECTRICITY_PRICE_TYPELIST WHERE NAME = ?;"
+                            << "typeList2" >> recordCount;
+        if(recordCount == 0){
+            ElectricityPriceDb << "INSERT INTO ELECTRICITY_PRICE_TYPELIST ("
+                                    "NAME, "
+                                    "JIAN_INPUT, JIAN_OUTPUT, "
+                                    "FENG_INPUT, FENG_OUTPUT, "
+                                    "PING_INPUT, PING_OUTPUT, "
+                                    "GU_INPUT, GU_OUTPUT) "
+                                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);"
+                                << "typeList2"
+                                << "1.410" << "1.410"
+                                << "1.310" << "1.310"
+                                << "1.210" << "1.210"
+                                << "1.110" << "1.110";
+        }
+    }
+}
+catch(const std::exception& e){
+    std::cerr << e.what() << '\n';
+}
+}
+
+void TypeList::requestCallbackPost(const httplib::Request &req, httplib::Response &res, shared_ptr<zmq::socket_t> stationDealer)
+{
+try
+{
+    const auto reqbody = json_wrapper::deserialize(req.body);
+    const string usernameAuth = base::UserManager::doAuth(reqbody);/* 鉴权 */
 
     /** 解析业务参数 */
     if(!reqbody.isMember("name")
@@ -104,15 +156,15 @@ try
                         << pingInput << pingOutput << guInput << guOutput;
 
     // 这里只做通知，不同步获取结果.
-    dealer_.send(zmq::message_t(postSubtitle_), zmq::send_flags::sndmore);
-    dealer_.send(zmq::message_t(), zmq::send_flags::none);
+    // stationDealer->send(zmq::message_t(postSubtitle_), zmq::send_flags::sndmore);
+    // stationDealer->send(zmq::message_t(), zmq::send_flags::none);
 
     // 保存'成功'操作记录
     const string status = "success";
     const string content{ "success" };
     const string type{ "参数设置" };
-    const string timestamp = miscellaneous::getCurrentTimestamp();
-    const string username = miscellaneous::getCurrentTimestamp();
+    const string timestamp = datetime::getCurrentTimestamp();
+    const string username = datetime::getCurrentTimestamp();
     // OperationRecord::insertRecord(status, content, type, timestamp, username);
 
     // 成功响应
@@ -127,8 +179,8 @@ catch(const std::exception& e){
     const string status = "failed";
     const string content{ e.what() };
     const string type{ "参数设置" };
-    const string timestamp = miscellaneous::getCurrentTimestamp();
-    const string username = miscellaneous::getCurrentTimestamp();
+    const string timestamp = datetime::getCurrentTimestamp();
+    const string username = datetime::getCurrentTimestamp();
     // OperationRecord::insertRecord(status, content, type, timestamp, username);
 
     Json::Value respondmsg;
@@ -136,16 +188,9 @@ catch(const std::exception& e){
     respondmsg["errmsg"] = e.what();
     utils::httpRespond(res, respondmsg);
 }
-}
+}  
 
-void TypeList::respondCallback(std::shared_ptr<StationInfo> stationInfo, zmq::socket_t& router,
-                        const vector<byte>& identity, const vector<byte>& subtitle, const vector<byte>& body) const
-{
-    // 重载数据库
-    // 不返回
-}   
-
-void TypeList::requestCallbackGet(const httplib::Request &req, httplib::Response &res)
+void TypeList::requestCallbackGet(const httplib::Request &req, httplib::Response &res, shared_ptr<zmq::socket_t> stationDealer)
 {
 try
 {
@@ -209,7 +254,7 @@ catch(const std::exception& e){
 }
 }
 
-void TypeList::requestCallbackGetNameList(const httplib::Request &req, httplib::Response &res)
+void TypeList::requestCallbackGetNameList(const httplib::Request &req, httplib::Response &res, shared_ptr<zmq::socket_t> stationDealer)
 {
 try
 {
@@ -252,23 +297,12 @@ catch(const std::exception& e){
 }
 }
 
-void TypeList::requestCallbackDelete(const httplib::Request &req, httplib::Response &res)
+void TypeList::requestCallbackDelete(const httplib::Request &req, httplib::Response &res, shared_ptr<zmq::socket_t> stationDealer)
 {
 try
 {
-    const auto reqbody = miscellaneous::unserializedJson(req.body);
-
-    /* 鉴权 */
-    Json::Value auth;
-    if(!reqbody.isMember("auth"))
-        throw std::runtime_error("request params err");
-    auth = reqbody["auth"];
-    if(!auth.isMember("username") || !auth.isMember("password"))
-        throw std::runtime_error("request params err");
-    const string usernameAuth = auth["username"].asString();
-    const string passwordAuth = auth["password"].asString();
-    if(!UserManager::doAuth(usernameAuth, passwordAuth))
-        throw std::runtime_error("auth failed");
+    const auto reqbody = json_wrapper::deserialize(req.body);
+    const string usernameAuth = base::UserManager::doAuth(reqbody);/* 鉴权 */
     const string typeListName = reqbody["name"].asString();
     
     // 操作数据库
@@ -302,8 +336,8 @@ try
                         << typeListName;
 
     // 这里只做通知，不同步获取结果.
-    dealer_.send(zmq::message_t(deleteSubtitle_), zmq::send_flags::sndmore);
-    dealer_.send(zmq::message_t(), zmq::send_flags::none);
+    // stationDealer->send(zmq::message_t(deleteSubtitle_), zmq::send_flags::sndmore);
+    // stationDealer->send(zmq::message_t(), zmq::send_flags::none);
     
     Json::Value respondContent;
     respondContent["errcode"] = 0;
@@ -319,23 +353,12 @@ catch(const std::exception& e){
 }
 }
 
-void TypeList::requestCallbackPut(const httplib::Request &req, httplib::Response &res)
+void TypeList::requestCallbackPut(const httplib::Request &req, httplib::Response &res, shared_ptr<zmq::socket_t> stationDealer)
 {
 try
 {
-    const auto reqbody = miscellaneous::unserializedJson(req.body);
-
-    /* 鉴权 */
-    Json::Value auth;
-    if(!reqbody.isMember("auth"))
-        throw std::runtime_error("request params err");
-    auth = reqbody["auth"];
-    if(!auth.isMember("username") || !auth.isMember("password"))
-        throw std::runtime_error("request params err");
-    const string usernameAuth = auth["username"].asString();
-    const string passwordAuth = auth["password"].asString();
-    if(!UserManager::doAuth(usernameAuth, passwordAuth))
-        throw std::runtime_error("auth failed");
+    const auto reqbody = json_wrapper::deserialize(req.body);
+    const string usernameAuth = base::UserManager::doAuth(reqbody);/* 鉴权 */
 
     /** 解析业务参数 */
     if(!reqbody.isMember("name")
@@ -378,15 +401,15 @@ try
                         << typeListName;
 
     // 这里只做通知，不同步获取结果.
-    dealer_.send(zmq::message_t(putSubtitle_), zmq::send_flags::sndmore);
-    dealer_.send(zmq::message_t(), zmq::send_flags::none);
+    // stationDealer->send(zmq::message_t(putSubtitle_), zmq::send_flags::sndmore);
+    // stationDealer->send(zmq::message_t(), zmq::send_flags::none);
 
     // 保存'成功'操作记录
     const string status { "success" };
     const string content{ "success" };
     const string type{ "参数设置" };
-    const string timestamp = miscellaneous::getCurrentTimestamp();
-    const string username = miscellaneous::getCurrentTimestamp();
+    const string timestamp = datetime::getCurrentTimestamp();
+    const string username = datetime::getCurrentTimestamp();
     // OperationRecord::insertRecord(status, content, type, timestamp, username);
 
     // 成功响应
@@ -400,8 +423,8 @@ catch(const std::exception& e){
     const string status = "failed";
     const string content{ e.what() };
     const string type{ "参数设置" };
-    const string timestamp = miscellaneous::getCurrentTimestamp();
-    const string username = miscellaneous::getCurrentTimestamp();
+    const string timestamp = datetime::getCurrentTimestamp();
+    const string username = datetime::getCurrentTimestamp();
     // OperationRecord::insertRecord(status, content, type, timestamp, username);
 
     // 失败响应
@@ -412,94 +435,7 @@ catch(const std::exception& e){
 }
 }
 
-std::string TypeList::createTable()
-{
-    string finalResult;
-
-    try
-    {
-        /* code */
-        const string projectPath{ "/opt/paceic_ems_server/main" };
-        const string dbPath{ projectPath + "/db" };
-        BOOST_ASSERT(filesystem::is_directory(dbPath));
-
-        const string filename{ dbPath + "/ElectricityPrice.sqlite" };
-        sqlite::database ElectricityPriceDb(filename);
-
-        /**
-         * 后期优化注解：
-         *      1, 拼接列定义时，可以先使用vector将其缓存，然后再与SQL语句进行组合
-         *      2, jian_input等列实际业务数据类型应为浮点类型，当前原型开发阶段暂时统一为字符串类型
-         *      3, ...
-        */
-        ElectricityPriceDb << "CREATE TABLE IF NOT EXISTS ELECTRICITY_PRICE_TYPELIST("
-                              "NAME TEXT PRIMARY KEY,"
-                              "JIAN_INPUT TEXT,"
-                              "JIAN_OUTPUT TEXT,"
-                              "FENG_INPUT TEXT,"
-                              "FENG_OUTPUT TEXT,"
-                              "PING_INPUT TEXT,"
-                              "PING_OUTPUT TEXT,"
-                              "GU_INPUT TEXT,"
-                              "GU_OUTPUT TEXT)";
-        finalResult =  filename;
-    }
-    catch(const std::exception& e)
-    {
-        std::cerr << e.what() << '\n';
-        return string();
-    }
-    return finalResult;
-}
-
-bool TypeList::insertIntoDefaultRecord()
-{
-    bool finalResult;
-    try
-    {
-        /* code */
-        const string projectPath{ "/opt/paceic_ems_server/main" };
-        const string dbPath{ projectPath + "/db" };
-        BOOST_ASSERT(filesystem::is_directory(dbPath));
-
-        const string filename{ dbPath + "/ElectricityPrice.sqlite" };
-        sqlite::database ElectricityPriceDb(filename);
-
-        ElectricityPriceDb << "INSERT INTO ELECTRICITY_PRICE_TYPELIST ("
-                              "NAME, "
-                              "JIAN_INPUT, JIAN_OUTPUT, "
-                              "FENG_INPUT, FENG_OUTPUT, "
-                              "PING_INPUT, PING_OUTPUT, "
-                              "GU_INPUT, GU_OUTPUT) "
-                              "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);"
-                            << "typeList1"
-                            << "1.400" << "1.400"
-                            << "1.300" << "1.300"
-                            << "1.200" << "1.200"
-                            << "1.100" << "1.100";
-        ElectricityPriceDb << "INSERT INTO ELECTRICITY_PRICE_TYPELIST ("
-                              "NAME, "
-                              "JIAN_INPUT, JIAN_OUTPUT, "
-                              "FENG_INPUT, FENG_OUTPUT, "
-                              "PING_INPUT, PING_OUTPUT, "
-                              "GU_INPUT, GU_OUTPUT) "
-                              "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);"
-                            << "typeList2"
-                            << "1.410" << "1.410"
-                            << "1.310" << "1.310"
-                            << "1.210" << "1.210"
-                            << "1.110" << "1.110";
-        finalResult = true;
-    }
-    catch(const std::exception& e)
-    {
-        std::cerr << e.what() << '\n';
-        return false;
-    }
-    return finalResult;
-}
-
-TypeList::Record TypeList::getRecord(const string& name) const
+TypeList::Record TypeList::getRecord(const string& name)
 {
     const string projectPath{ "/opt/paceic_ems_server/main" };
     const string dbPath{ projectPath + "/db" };

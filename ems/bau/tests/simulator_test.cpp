@@ -1,4 +1,4 @@
-#include "utils/SyncSocketRespond.h"
+#include "utils/SyncRespond.h"
 #include "ems/bau/Simulator.h"
 
 using namespace std;
@@ -9,7 +9,7 @@ int main(int argc, char **argv)
 
     // pcs::Simulator 
     auto pcsSimulator = make_unique<bau::Simulator>();
-    SyncSocketRespond syncRespond(argv[1],
+    SyncRespond syncRespond(argv[1],
                                     std::bind(&bau::Simulator::getRespondFrame,
                                                                 pcsSimulator.get(),
                                                                 std::placeholders::_1));

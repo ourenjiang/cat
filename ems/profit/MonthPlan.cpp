@@ -6,61 +6,119 @@
 #include <memory>
 #include "utils/MsgpackWrapper_src.hpp"
 #include "utils/Miscellaneous.h"
-#include "ems/station/OperationRecord.h"
-#include "ems/station/UserManager.h"
+#include "ems/interface/OperationRecord.h"
+#include "ems/base/UserManager.h"
 #include "utils/AuthException.h"
+#include "utils/datetime.h"
+#include "utils/jsonWrapper.h"
 
 using namespace ems;
 using namespace ems::electricity_price;
 
-MonthPlan::MonthPlan()
-    : identity_("ElectricityPriceMonthPlan")
-    , dealer_(miscellaneous::createZmqSocket(zmq::socket_type::dealer))
-{
-    createTable();
-    insertIntoDefaultRecord();
-    registerHttpInterfaces();
-    dealer_.set(zmq::sockopt::routing_id, identity_);
-    dealer_.connect("tcp://127.0.0.1:6200");
-}
-
-void MonthPlan::registerHttpInterfaces()
-{
-    using namespace std::placeholders;
-    auto& serv = utils::getHttpServerSingleton();
-    serv.Post("/xftg/electricityPrice/monthPlan", httplib::Server::Handler(bind(&MonthPlan::requestCallbackPost, this, _1, _2)));
-    serv.Get("/xftg/electricityPrice/monthPlan", httplib::Server::Handler(bind(&MonthPlan::requestCallbackGet, this, _1, _2)));
-    serv.Delete("/xftg/electricityPrice/monthPlan", httplib::Server::Handler(bind(&MonthPlan::requestCallbackDelete, this, _1, _2)));
-    serv.Put("/xftg/electricityPrice/monthPlan", httplib::Server::Handler(bind(&MonthPlan::requestCallbackPut, this, _1, _2)));
-}
-
-void MonthPlan::respondCallback(std::shared_ptr<StationInfo> stationInfo, zmq::socket_t& router,
-                        const vector<byte>& identity, const vector<byte>& subtitle, const vector<byte>& body) const
-{
-
-}  
-
-vector<byte> MonthPlan::identity()
-{
-    const auto beginItr = reinterpret_cast<const byte*>(identity_.data());
-    return { beginItr, beginItr + identity_.size() };
-}
-
-void MonthPlan::requestCallbackPost(const httplib::Request &req, httplib::Response &res)
+void MonthPlan::createTable()
 {
 try
 {
-    const auto reqbody = miscellaneous::unserializedJson(req.body);
+    const string projectPath{ "/opt/paceic_ems_server/main" };
+    const string dbPath{ projectPath + "/db" };
+    BOOST_ASSERT(filesystem::is_directory(dbPath));
 
-    /* 鉴权 */
-    Json::Value auth;
-    if(!reqbody.isMember("auth"))
-        throw std::runtime_error("request params err");
-    auth = reqbody["auth"];
-    if(!auth.isMember("username") || !auth.isMember("password"))
-        throw std::runtime_error("request params err");
-    if(!UserManager::doAuth(auth["username"].asString(), auth["password"].asString()))
-        throw std::runtime_error("auth failed");
+    const string filename{ dbPath + "/ElectricityPrice.sqlite" };
+    sqlite::database ElectricityPriceDb(filename);
+
+    /**
+     * 后期优化注解：
+     *      1, 拼接列定义时，可以先使用vector将其缓存，然后再与SQL语句进行组合
+     *      2, jian_input等列实际业务数据类型应为浮点类型，当前原型开发阶段暂时统一为字符串类型
+     *      3, ...
+    */
+    ElectricityPriceDb << "CREATE TABLE IF NOT EXISTS ELECTRICITY_PRICE_MONTHPLAN("
+                            "NAME TEXT PRIMARY KEY,"
+                            "MONTH_NO TEXT,"
+                            "DAYPLAN_NAME TEXT,"
+                            "TYPELIST_NAME TEXT)";
+}
+catch(const std::exception& e){
+    std::cerr << e.what() << '\n';
+}
+}
+
+void MonthPlan::insertIntoDefaultRecord()
+{
+try
+{
+    const string projectPath{ "/opt/paceic_ems_server/main" };
+    const string dbPath{ projectPath + "/db" };
+    BOOST_ASSERT(filesystem::is_directory(dbPath));
+
+    const string filename{ dbPath + "/ElectricityPrice.sqlite" };
+    sqlite::database ElectricityPriceDb(filename);
+
+    // ElectricityPriceDb << "DELETE FROM ELECTRICITY_PRICE_MONTHPLAN;";// clear old records
+    int recordCount{0};
+    ElectricityPriceDb << "SELECT COUNT(*) FROM ELECTRICITY_PRICE_MONTHPLAN;" >> recordCount;
+    if(recordCount == 0) return;
+
+    ElectricityPriceDb << "INSERT INTO ELECTRICITY_PRICE_MONTHPLAN ("
+                            "NAME, MONTH_NO, DAYPLAN_NAME, TYPELIST_NAME) "
+                            "VALUES (?, ?, ?, ?);"
+                            << "monthPlan1" << "1" << "dayPlan1" << "typeList1";
+    ElectricityPriceDb << "INSERT INTO ELECTRICITY_PRICE_MONTHPLAN ("
+                            "NAME, MONTH_NO, DAYPLAN_NAME, TYPELIST_NAME) "
+                            "VALUES (?, ?, ?, ?);"
+                            << "monthPlan2" << "2" << "dayPlan2" << "typeList1";
+    ElectricityPriceDb << "INSERT INTO ELECTRICITY_PRICE_MONTHPLAN ("
+                            "NAME, MONTH_NO, DAYPLAN_NAME, TYPELIST_NAME) "
+                            "VALUES (?, ?, ?, ?);"
+                            << "monthPlan3" << "3" << "dayPlan2" << "typeList2";
+    ElectricityPriceDb << "INSERT INTO ELECTRICITY_PRICE_MONTHPLAN ("
+                            "NAME, MONTH_NO, DAYPLAN_NAME, TYPELIST_NAME) "
+                            "VALUES (?, ?, ?, ?);"
+                            << "monthPlan4" << "4" << "dayPlan1" << "typeList1";
+    ElectricityPriceDb << "INSERT INTO ELECTRICITY_PRICE_MONTHPLAN ("
+                            "NAME, MONTH_NO, DAYPLAN_NAME, TYPELIST_NAME) "
+                            "VALUES (?, ?, ?, ?);"
+                            << "monthPlan5" << "5" << "dayPlan1" << "typeList2";
+    ElectricityPriceDb << "INSERT INTO ELECTRICITY_PRICE_MONTHPLAN ("
+                            "NAME, MONTH_NO, DAYPLAN_NAME, TYPELIST_NAME) "
+                            "VALUES (?, ?, ?, ?);"
+                            << "monthPlan6" << "6" << "dayPlan2" << "typeList2";
+    ElectricityPriceDb << "INSERT INTO ELECTRICITY_PRICE_MONTHPLAN ("
+                            "NAME, MONTH_NO, DAYPLAN_NAME, TYPELIST_NAME) "
+                            "VALUES (?, ?, ?, ?);"
+                            << "monthPlan7" << "7" << "dayPlan1" << "typeList1";
+    ElectricityPriceDb << "INSERT INTO ELECTRICITY_PRICE_MONTHPLAN ("
+                            "NAME, MONTH_NO, DAYPLAN_NAME, TYPELIST_NAME) "
+                            "VALUES (?, ?, ?, ?);"
+                            << "monthPlan8" << "8" << "dayPlan2" << "typeList1";
+    ElectricityPriceDb << "INSERT INTO ELECTRICITY_PRICE_MONTHPLAN ("
+                            "NAME, MONTH_NO, DAYPLAN_NAME, TYPELIST_NAME) "
+                            "VALUES (?, ?, ?, ?);"
+                            << "monthPlan9" << "9" << "dayPlan2" << "typeList2";
+    ElectricityPriceDb << "INSERT INTO ELECTRICITY_PRICE_MONTHPLAN ("
+                            "NAME, MONTH_NO, DAYPLAN_NAME, TYPELIST_NAME) "
+                            "VALUES (?, ?, ?, ?);"
+                            << "monthPlan10" << "10" << "dayPlan1" << "typeList1";
+    ElectricityPriceDb << "INSERT INTO ELECTRICITY_PRICE_MONTHPLAN ("
+                            "NAME, MONTH_NO, DAYPLAN_NAME, TYPELIST_NAME) "
+                            "VALUES (?, ?, ?, ?);"
+                            << "monthPlan11" << "11" << "dayPlan1" << "typeList2";
+    ElectricityPriceDb << "INSERT INTO ELECTRICITY_PRICE_MONTHPLAN ("
+                            "NAME, MONTH_NO, DAYPLAN_NAME, TYPELIST_NAME) "
+                            "VALUES (?, ?, ?, ?);"
+                            << "monthPlan12" << "12" << "dayPlan2" << "typeList2";
+}
+catch(const std::exception& e){
+    std::cerr << e.what() << '\n';
+}
+}
+
+void MonthPlan::requestCallbackPost(const httplib::Request &req, httplib::Response &res, shared_ptr<zmq::socket_t> stationDealer)
+{
+try
+{
+    const auto reqbody = json_wrapper::deserialize(req.body);
+    const string usernameAuth = base::UserManager::doAuth(reqbody);/* 鉴权 */
 
     /** 解析业务参数 */
     if(!reqbody.isMember("name") || !reqbody.isMember("monthNo")
@@ -85,21 +143,21 @@ try
     ElectricityPriceDb << "SELECT COUNT(*) FROM ELECTRICITY_PRICE_MONTHPLAN WHERE NAME = ?;"
         << monthPlanName >> monthPlanRecordCount;
     if(monthPlanRecordCount > 0)
-        throw AuthException("月计划已存在", auth["username"].asString());
+        throw AuthException("月计划已存在", usernameAuth);
     
     // 检查DayPlan记录是否已存在
     int dayPlanRecordCount{ 0 };
     ElectricityPriceDb << "SELECT COUNT(*) FROM ELECTRICITY_PRICE_DAYPLAN WHERE NAME = ?;"
         << dayPlanName >> dayPlanRecordCount;
     if(dayPlanRecordCount == 0)
-        throw AuthException("日计划不存在", auth["username"].asString());
+        throw AuthException("日计划不存在", usernameAuth);
     
     // 检查TypeList记录是否已存在
     int typeListRecordCount{ 0 };
     ElectricityPriceDb << "SELECT COUNT(*) FROM ELECTRICITY_PRICE_TYPELIST WHERE NAME = ?;"
         << typeListName >> typeListRecordCount;
     if(typeListRecordCount == 0)
-        throw AuthException("电价类型不存在", auth["username"].asString());
+        throw AuthException("电价类型不存在", usernameAuth);
     
     ElectricityPriceDb << "INSERT INTO ELECTRICITY_PRICE_MONTHPLAN ("
                         "NAME, "
@@ -109,14 +167,15 @@ try
                     << monthPlanName
                     << monthNo << dayPlanName << typeListName;
     // 通知中心
-    dealer_.send(zmq::message_t(postSubtitle_), zmq::send_flags::sndmore);
-    dealer_.send(zmq::message_t(), zmq::send_flags::none);
+    // stationDealer->send(zmq::message_t(postSubtitle_), zmq::send_flags::sndmore);
+    // stationDealer->send(zmq::message_t(), zmq::send_flags::none);
+
     // 保存'成功'操作记录
     const string status = "success";
     const string content{ "success" };
     const string type{ "参数设置" };
-    const string timestamp = miscellaneous::getCurrentTimestamp();
-    const string username = miscellaneous::getCurrentTimestamp();
+    const string timestamp = datetime::getCurrentTimestamp();
+    const string username = datetime::getCurrentTimestamp();
     // OperationRecord::insertRecord(status, content, type, timestamp, username);
 
     // 成功响应
@@ -131,8 +190,8 @@ catch(const std::exception& e){
     const string status = "failed";
     const string content{ e.what() };
     const string type{ "参数设置" };
-    const string timestamp = miscellaneous::getCurrentTimestamp();
-    const string username = miscellaneous::getCurrentTimestamp();
+    const string timestamp = datetime::getCurrentTimestamp();
+    const string username = datetime::getCurrentTimestamp();
     // OperationRecord::insertRecord(status, content, type, timestamp, username);
 
     Json::Value respondmsg;
@@ -142,11 +201,11 @@ catch(const std::exception& e){
 }
 }
 
-void MonthPlan::requestCallbackGet(const httplib::Request &req, httplib::Response &res)
+void MonthPlan::requestCallbackGet(const httplib::Request &req, httplib::Response &res, shared_ptr<zmq::socket_t> stationDealer)
 {
     // 不提供名称时，将请求转发至获取全部记录接口
     if(!req.has_param("name")){
-        requestCallbackGetAll(req, res);
+        requestCallbackGetAll(req, res, stationDealer);
         return;
     }
 
@@ -198,7 +257,7 @@ catch(const std::exception& e){
 }
 }
 
-void MonthPlan::requestCallbackGetAll(const httplib::Request &req, httplib::Response &res)
+void MonthPlan::requestCallbackGetAll(const httplib::Request &req, httplib::Response &res, shared_ptr<zmq::socket_t> stationDealer)
 {
 try
 {
@@ -244,21 +303,12 @@ catch(const std::exception& e){
 }
 }
 
-void MonthPlan::requestCallbackDelete(const httplib::Request &req, httplib::Response &res)
+void MonthPlan::requestCallbackDelete(const httplib::Request &req, httplib::Response &res, shared_ptr<zmq::socket_t> stationDealer)
 {
 try
 {
-    const auto reqbody = miscellaneous::unserializedJson(req.body);
-
-    /* 鉴权 */
-    Json::Value auth;
-    if(!reqbody.isMember("auth"))
-        throw std::runtime_error("request params err");
-    auth = reqbody["auth"];
-    if(!auth.isMember("username") || !auth.isMember("password"))
-        throw std::runtime_error("request params err");
-    if(!UserManager::doAuth(auth["username"].asString(), auth["password"].asString()))
-        throw std::runtime_error("auth failed");
+    const auto reqbody = json_wrapper::deserialize(req.body);
+    const string usernameAuth = base::UserManager::doAuth(reqbody);/* 鉴权 */
 
     /** 解析业务参数 */
     if(!reqbody.isMember("name"))
@@ -284,8 +334,8 @@ try
     ElectricityPriceDb << "DELETE FROM ELECTRICITY_PRICE_MONTHPLAN WHERE NAME = ?;"
                         << monthPlanName;
     //通知中心
-    dealer_.send(zmq::message_t(deleteSubtitle_), zmq::send_flags::sndmore);
-    dealer_.send(zmq::message_t(), zmq::send_flags::none);
+    // stationDealer->send(zmq::message_t(deleteSubtitle_), zmq::send_flags::sndmore);
+    // stationDealer->send(zmq::message_t(), zmq::send_flags::none);
 
     Json::Value respondContent;
     respondContent["errcode"] = 0;
@@ -300,23 +350,12 @@ catch(const std::exception& e){
 }
 }
 
-void MonthPlan::requestCallbackPut(const httplib::Request &req, httplib::Response &res)
+void MonthPlan::requestCallbackPut(const httplib::Request &req, httplib::Response &res, shared_ptr<zmq::socket_t> stationDealer)
 {
 try
 {
-    const auto reqbody = miscellaneous::unserializedJson(req.body);
-
-    /* 鉴权 */
-    Json::Value auth;
-    if(!reqbody.isMember("auth"))
-        throw std::runtime_error("request params err");
-    auth = reqbody["auth"];
-    if(!auth.isMember("username") || !auth.isMember("password"))
-        throw std::runtime_error("request params err");
-    const string usernameAuth = auth["username"].asString();
-    const string passwordAuth = auth["password"].asString();
-    if(!UserManager::doAuth(usernameAuth, passwordAuth))
-        throw std::runtime_error("auth failed");
+    const auto reqbody = json_wrapper::deserialize(req.body);
+    const string usernameAuth = base::UserManager::doAuth(reqbody);/* 鉴权 */
 
     /** 解析业务参数 */
     if(!reqbody.isMember("name") || !reqbody.isMember("monthNo")
@@ -365,14 +404,15 @@ try
                         << dayPlanName << typeListName
                         << monthPlanName;
     // 通知中心
-    dealer_.send(zmq::message_t(putSubtitle_), zmq::send_flags::sndmore);
-    dealer_.send(zmq::message_t(), zmq::send_flags::none);
+    // stationDealer->send(zmq::message_t(putSubtitle_), zmq::send_flags::sndmore);
+    // stationDealer->send(zmq::message_t(), zmq::send_flags::none);
+
     // 保存'成功'操作记录
     const string status { "success" };
     const string content{ "success" };
     const string type{ "参数设置" };
-    const string timestamp = miscellaneous::getCurrentTimestamp();
-    const string username = miscellaneous::getCurrentTimestamp();
+    const string timestamp = datetime::getCurrentTimestamp();
+    const string username = datetime::getCurrentTimestamp();
     // OperationRecord::insertRecord(status, content, type, timestamp, username);
 
     // 成功响应
@@ -386,8 +426,8 @@ catch(const std::exception& e){
     const string status = "failed";
     const string content{ e.what() };
     const string type{ "参数设置" };
-    const string timestamp = miscellaneous::getCurrentTimestamp();
-    const string username = miscellaneous::getCurrentTimestamp();
+    const string timestamp = datetime::getCurrentTimestamp();
+    const string username = datetime::getCurrentTimestamp();
     // OperationRecord::insertRecord(status, content, type, timestamp, username);
 
     // 失败响应
@@ -398,176 +438,69 @@ catch(const std::exception& e){
 }
 }
 
-std::string MonthPlan::createTable()
+void MonthPlan::deleteRecord(const string& name)
 {
-    try
-    {
-        /* code */
-        const string projectPath{ "/opt/paceic_ems_server/main" };
-        const string dbPath{ projectPath + "/db" };
-        BOOST_ASSERT(filesystem::is_directory(dbPath));
+try
+{
+    const string projectPath{ "/opt/paceic_ems_server/main" };
+    const string dbPath{ projectPath + "/db" };
+    BOOST_ASSERT(filesystem::is_directory(dbPath));
 
-        const string filename{ dbPath + "/ElectricityPrice.sqlite" };
-        sqlite::database ElectricityPriceDb(filename);
+    const string filename{ dbPath + "/ElectricityPrice.sqlite" };
+    sqlite::database ElectricityPriceDb(filename);
 
-        /**
-         * 后期优化注解：
-         *      1, 拼接列定义时，可以先使用vector将其缓存，然后再与SQL语句进行组合
-         *      2, jian_input等列实际业务数据类型应为浮点类型，当前原型开发阶段暂时统一为字符串类型
-         *      3, ...
-        */
-        ElectricityPriceDb << "CREATE TABLE IF NOT EXISTS ELECTRICITY_PRICE_MONTHPLAN("
-                              "NAME TEXT PRIMARY KEY,"
-                              "MONTH_NO TEXT,"
-                              "DAYPLAN_NAME TEXT,"
-                              "TYPELIST_NAME TEXT)";
-        return filename;
-    }
-    catch(const std::exception& e){
-        std::cerr << e.what() << '\n';
-    }
-    return {};
+    // 检查记录是否存在
+    int recordCount{0};
+    ElectricityPriceDb << "SELECT COUNT(*) FROM ELECTRICITY_PRICE_MONTHPLAN WHERE NAME = ?;"
+        << name >> recordCount;
+    if(recordCount == 0)
+        throw std::runtime_error("记录不存在");
+
+    // 执行删除
+    ElectricityPriceDb << "DELETE FROM ELECTRICITY_PRICE_MONTHPLAN "
+                            "WHERE NAME = ?;"
+                        << name;
+}
+catch(const std::exception& e){
+    std::cerr << e.what() << '\n';
+}
 }
 
-bool MonthPlan::insertIntoDefaultRecord()
-{
-    try
-    {
-        /* code */
-        const string projectPath{ "/opt/paceic_ems_server/main" };
-        const string dbPath{ projectPath + "/db" };
-        BOOST_ASSERT(filesystem::is_directory(dbPath));
-
-        const string filename{ dbPath + "/ElectricityPrice.sqlite" };
-        sqlite::database ElectricityPriceDb(filename);
-
-        ElectricityPriceDb << "DELETE FROM ELECTRICITY_PRICE_MONTHPLAN;";// clear old records
-
-        ElectricityPriceDb << "INSERT INTO ELECTRICITY_PRICE_MONTHPLAN ("
-                                "NAME, MONTH_NO, DAYPLAN_NAME, TYPELIST_NAME) "
-                                "VALUES (?, ?, ?, ?);"
-                                << "monthPlan1" << "1" << "dayPlan1" << "typeList1";
-        ElectricityPriceDb << "INSERT INTO ELECTRICITY_PRICE_MONTHPLAN ("
-                                "NAME, MONTH_NO, DAYPLAN_NAME, TYPELIST_NAME) "
-                                "VALUES (?, ?, ?, ?);"
-                                << "monthPlan2" << "2" << "dayPlan2" << "typeList1";
-        ElectricityPriceDb << "INSERT INTO ELECTRICITY_PRICE_MONTHPLAN ("
-                                "NAME, MONTH_NO, DAYPLAN_NAME, TYPELIST_NAME) "
-                                "VALUES (?, ?, ?, ?);"
-                                << "monthPlan3" << "3" << "dayPlan2" << "typeList2";
-        ElectricityPriceDb << "INSERT INTO ELECTRICITY_PRICE_MONTHPLAN ("
-                                "NAME, MONTH_NO, DAYPLAN_NAME, TYPELIST_NAME) "
-                                "VALUES (?, ?, ?, ?);"
-                                << "monthPlan4" << "4" << "dayPlan1" << "typeList1";
-        ElectricityPriceDb << "INSERT INTO ELECTRICITY_PRICE_MONTHPLAN ("
-                                "NAME, MONTH_NO, DAYPLAN_NAME, TYPELIST_NAME) "
-                                "VALUES (?, ?, ?, ?);"
-                                << "monthPlan5" << "5" << "dayPlan1" << "typeList2";
-        ElectricityPriceDb << "INSERT INTO ELECTRICITY_PRICE_MONTHPLAN ("
-                                "NAME, MONTH_NO, DAYPLAN_NAME, TYPELIST_NAME) "
-                                "VALUES (?, ?, ?, ?);"
-                                << "monthPlan6" << "6" << "dayPlan2" << "typeList2";
-        ElectricityPriceDb << "INSERT INTO ELECTRICITY_PRICE_MONTHPLAN ("
-                                "NAME, MONTH_NO, DAYPLAN_NAME, TYPELIST_NAME) "
-                                "VALUES (?, ?, ?, ?);"
-                                << "monthPlan7" << "7" << "dayPlan1" << "typeList1";
-        ElectricityPriceDb << "INSERT INTO ELECTRICITY_PRICE_MONTHPLAN ("
-                                "NAME, MONTH_NO, DAYPLAN_NAME, TYPELIST_NAME) "
-                                "VALUES (?, ?, ?, ?);"
-                                << "monthPlan8" << "8" << "dayPlan2" << "typeList1";
-        ElectricityPriceDb << "INSERT INTO ELECTRICITY_PRICE_MONTHPLAN ("
-                                "NAME, MONTH_NO, DAYPLAN_NAME, TYPELIST_NAME) "
-                                "VALUES (?, ?, ?, ?);"
-                                << "monthPlan9" << "9" << "dayPlan2" << "typeList2";
-        ElectricityPriceDb << "INSERT INTO ELECTRICITY_PRICE_MONTHPLAN ("
-                                "NAME, MONTH_NO, DAYPLAN_NAME, TYPELIST_NAME) "
-                                "VALUES (?, ?, ?, ?);"
-                                << "monthPlan10" << "10" << "dayPlan1" << "typeList1";
-        ElectricityPriceDb << "INSERT INTO ELECTRICITY_PRICE_MONTHPLAN ("
-                                "NAME, MONTH_NO, DAYPLAN_NAME, TYPELIST_NAME) "
-                                "VALUES (?, ?, ?, ?);"
-                                << "monthPlan11" << "11" << "dayPlan1" << "typeList2";
-        ElectricityPriceDb << "INSERT INTO ELECTRICITY_PRICE_MONTHPLAN ("
-                                "NAME, MONTH_NO, DAYPLAN_NAME, TYPELIST_NAME) "
-                                "VALUES (?, ?, ?, ?);"
-                                << "monthPlan12" << "12" << "dayPlan2" << "typeList2";
-        return true;
-    }
-    catch(const std::exception& e){
-        std::cerr << e.what() << '\n';
-    }
-    return {};
-}
-
-bool MonthPlan::deleteRecord(const string& name)
-{
-    try
-    {
-        /* code */
-        const string projectPath{ "/opt/paceic_ems_server/main" };
-        const string dbPath{ projectPath + "/db" };
-        BOOST_ASSERT(filesystem::is_directory(dbPath));
-
-        const string filename{ dbPath + "/ElectricityPrice.sqlite" };
-        sqlite::database ElectricityPriceDb(filename);
-
-        // 检查记录是否存在
-        int recordCount{0};
-        ElectricityPriceDb << "SELECT COUNT(*) FROM ELECTRICITY_PRICE_MONTHPLAN WHERE NAME = ?;"
-            << name >> recordCount;
-        if(recordCount == 0)
-            throw std::runtime_error("记录不存在");
-
-        // 执行删除
-        ElectricityPriceDb << "DELETE FROM ELECTRICITY_PRICE_MONTHPLAN "
-                              "WHERE NAME = ?;"
-                            << name;
-        return true;
-    }
-    catch(const std::exception& e){
-        std::cerr << e.what() << '\n';
-    }
-    return {};
-}
-
-bool MonthPlan::modifyRecord(const string& name, const string& monthNo,
+void MonthPlan::modifyRecord(const string& name, const string& monthNo,
                     const string& dayPlanName, const string& typeListName)
 {
-    try
-    {
-        /* code */
-        const string projectPath{ "/opt/paceic_ems_server/main" };
-        const string dbPath{ projectPath + "/db" };
-        BOOST_ASSERT(filesystem::is_directory(dbPath));
+try
+{
+    const string projectPath{ "/opt/paceic_ems_server/main" };
+    const string dbPath{ projectPath + "/db" };
+    BOOST_ASSERT(filesystem::is_directory(dbPath));
 
-        const string filename{ dbPath + "/ElectricityPrice.sqlite" };
-        sqlite::database ElectricityPriceDb(filename);
+    const string filename{ dbPath + "/ElectricityPrice.sqlite" };
+    sqlite::database ElectricityPriceDb(filename);
 
-        /** 先查询旧记录 */
-        using TempRecord = tuple<string, string, string>;
-        std::optional<TempRecord> optValue;
+    /** 先查询旧记录 */
+    using TempRecord = tuple<string, string, string>;
+    std::optional<TempRecord> optValue;
 
-        // 查询
-        int recordCount{0};
-        ElectricityPriceDb << "SELECT COUNT(*) FROM ELECTRICITY_PRICE_MONTHPLAN WHERE NAME = ?;"
-            << name >> recordCount;
-        if(recordCount == 0)
-            throw std::runtime_error("记录不存在");
-        
-        ElectricityPriceDb << "UPDATE ELECTRICITY_PRICE_MONTHPLAN SET "
-                              "MONTH_NO = ?, "
-                              "DAYPLAN_NAME = ?, "
-                              "TYPELIST_NAME = ? "
-                              "WHERE NAME = ?;"
-                           << monthNo
-                           << dayPlanName << typeListName
-                           << name;
-        return true;
-    }
-    catch(const std::exception& e){
-        std::cerr << e.what() << '\n';
-    }
-    return {};
+    // 查询
+    int recordCount{0};
+    ElectricityPriceDb << "SELECT COUNT(*) FROM ELECTRICITY_PRICE_MONTHPLAN WHERE NAME = ?;"
+        << name >> recordCount;
+    if(recordCount == 0)
+        throw std::runtime_error("记录不存在");
+    
+    ElectricityPriceDb << "UPDATE ELECTRICITY_PRICE_MONTHPLAN SET "
+                            "MONTH_NO = ?, "
+                            "DAYPLAN_NAME = ?, "
+                            "TYPELIST_NAME = ? "
+                            "WHERE NAME = ?;"
+                        << monthNo
+                        << dayPlanName << typeListName
+                        << name;
+}
+catch(const std::exception& e){
+    std::cerr << e.what() << '\n';
+}
 }
 
 std::optional<MonthPlan::Record> MonthPlan::getRecord(const string& name)

@@ -23,96 +23,17 @@ logger:
     { name: Station, priority: DEBUG }
 ]
 
-# 数据接口
-dataInterface:
-{
-    # Http端口号
-    httpPort: 8902
-}
-
-## 采集器
-collector:
+## 从站通讯地址
+slave:
 [
     {
         name: BAU,
-        load: true,
-        master:
-        {
-            # address: tcp://192.168.10.251:5557
-            address: tcp://127.0.0.1:5557
-        },
-        proxy:
-        {
-            address: tcp://*:5557
-        },
-        slave:
-        {
-            type: ModbusTCP,
-            slaveId: 1,
-            address: 127.0.0.1:2502
-            # address: 192.168.49.1:9001
-            # address: 192.168.50.230:1502
-        }
+        address: 127.0.0.1:2502
     },
     {
         name: PCS,
-        load: true,
-        master:
-        {
-            # address: tcp://192.168.10.251:5558
-            address: tcp://127.0.0.1:5558
-        },
-        proxy:
-        {
-            address: tcp://*:5558
-        },
-        slave:
-        {
-            type: ModbusTCP,
-            slaveId: 1,
-            # address: 192.168.10.252:9001
-            address: 127.0.0.1:8001
-        }
+        address: 127.0.0.1:8001
     }
 ]
-
-# 分支
-barnch0:
-{
-    bau:
-    {
-        masterAddress: tcp://127.0.0.1:5557,
-        proxyAddress: tcp://*:5557,
-        slave:
-        {
-            slaveId: 1,
-            address: 127.0.0.1:2502
-            # address: 192.168.49.1:9001
-            # address: 192.168.50.230:1502
-        },
-        slaveSimulator:
-        {
-            slaveId: 1,
-            address: 127.0.0.1:2502
-        }
-    },
-    pcs:
-    {
-        masterAddress: tcp://127.0.0.1:5558,
-        proxyAddress: tcp://*:5558,
-        slave:
-        {
-            slaveId: 1,
-            # address: 192.168.10.252:9001
-            address: 127.0.0.1:8001
-        },
-        slaveSimulator:
-        {
-            slaveId: 1,
-            # address: 192.168.10.252:9001
-            address: 127.0.0.1:8001
-        }
-    }
-}
 
 ## 注意，yaml-cpp文件末尾必须要保留空行，否则解析时会失败！！！

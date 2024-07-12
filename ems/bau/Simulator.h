@@ -25,8 +25,9 @@ private:
     void create_bmuCellvolt(const int bcuIndex, const int bmuIndex);
     void create_bmuCelltem(const int bcuIndex, const int bmuIndex);
 
-    void insertCommunicateInstance(const vector<uint8_t>& request, const vector<uint8_t>& respond);
-    map<vector<uint8_t>, vector<uint8_t>> requestRespondMap_;
+    void insertCommunicateInstance(const uint8_t funCode,
+        const uint16_t regLeft, const uint16_t regRight, const vector<uint16_t>& regList);
+    map<tuple<uint8_t, uint16_t, uint16_t>, vector<uint16_t>> requestRespondMap_;
 };
 
 }//namespace pcs

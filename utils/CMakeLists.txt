@@ -4,16 +4,24 @@ Log4cppWrapper.cpp
 YamlcppWrapper.cpp
 CommandlineParams.cpp
 EnvironmentVariables.cpp
-ZmqRequest.cpp
-ZmqRespond.cpp
 ZmqPublish.cpp
 ZmqSubscribe.cpp
-ZmqSocket.cpp
+ZmqNode.cpp
+zeromq.cpp
 Miscellaneous.cpp
 HttpWrapper.cpp
 cpphttplib_splitout/httplib.cc
-SyncSocketRequest.cpp
-SyncSocketRespond.cpp
+SyncRequest.cpp
+SyncRespond.cpp
+# SyncRespond2.cpp
+BoostTimer.cpp
+crc16.cpp
+datetime.cpp
+endian.cpp
+cgi.cpp
+ModbusRtu.cpp
+jsonWrapper.cpp
+StreamWrapper.cpp
 )
 
 add_library(cat_utils
@@ -28,7 +36,8 @@ boost_program_options.a
 zmq.a
 modbus.a
 jsoncpp.a
+boost_timer.a
 )
 
 add_subdirectory(tests)
-add_subdirectory(C++)
+# add_subdirectory(C++)

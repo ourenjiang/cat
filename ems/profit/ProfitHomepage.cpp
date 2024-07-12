@@ -1,80 +1,22 @@
 #include "ProfitHomepage.h"
-#include "utils/YamlcppWrapper.h"
 #include "utils/Miscellaneous.h"
 #include "utils/MsgpackWrapper_src.hpp"
+#include "ems/base/StationInfo.h"
+#include "utils/StreamWrapper.h"
 
 using namespace ems;
 
 Profit::Profit()
     : log_(ems::Log4cppWrapper::getLogger(5))
-    , identity_("ProfitHomepageGet")
-    , dealer_(miscellaneous::createZmqSocket(zmq::socket_type::dealer))
 {
-    registerAllInterfaces();
-    dealer_.set(zmq::sockopt::routing_id, identity_);
-    dealer_.connect("tcp://127.0.0.1:6200");
 }
 
-vector<byte> Profit::identity()
-{
-    const auto beginItr = reinterpret_cast<const byte*>(identity_.data());
-    return { beginItr, beginItr + identity_.size() };
-}
-
-void Profit::registerAllInterfaces()
-{
-    using namespace std::placeholders;
-    auto& serv = utils::getHttpServerSingleton();
-    serv.Get("/profit", bind(&Profit::requestCallback, this, _1, _2));
-}
-
-void Profit::requestCallback(const httplib::Request &req, httplib::Response &res)
+void Profit::requestCallback(const httplib::Request &req, httplib::Response &res, shared_ptr<zmq::socket_t> stationDealer)
 {
 try
 {
-    dealer_.send(zmq::message_t(), zmq::send_flags::sndmore);
-    dealer_.send(zmq::message_t(), zmq::send_flags::none);
-    // 接收消息
-    zmq::message_t rcvmsg;
-    (void)dealer_.recv(rcvmsg);
+    auto stationInfo = base::getStationInfo(stationDealer);
 
-    // 先解析标准的响应消息
-    pair<bool, vector<byte>> respondMsg;
-    const bool unpackMsgResult = msgpackWrapper::unpack(rcvmsg.data(), rcvmsg.size(), respondMsg);
-    BOOST_ASSERT(unpackMsgResult);
-    const auto& [returnStatus, returnContent] = respondMsg;
-    if(!returnStatus){
-        // 再解析自定义的响应内容
-        const string errmsg(reinterpret_cast<const char*>(returnContent.data()),
-                                    reinterpret_cast<const char*>(returnContent.data()) + returnContent.size());
-        throw std::runtime_error(errmsg);
-    }
-
-    // 再解析自定义的响应内容
-    const string respondContent(reinterpret_cast<const char*>(returnContent.data()),
-                                reinterpret_cast<const char*>(returnContent.data()) + returnContent.size());
-
-    // 成功响应
-    Json::Value repJson;
-    repJson["data"] = miscellaneous::unserializedJson(respondContent);
-    repJson["errcode"] = 0;
-    repJson["errmsg"] = "success";
-    utils::httpRespond(res, repJson);
-}
-catch(const std::exception& e){
-    Json::Value msg;
-    msg["data"] = Json::Value(Json::objectValue);
-    msg["errcode"] = -1;
-    msg["errmsg"] = e.what();
-    utils::httpRespond(res, msg);
-}
-}
-
-void Profit::respondCallback(std::shared_ptr<StationInfo> stationInfo, zmq::socket_t& router,
-                        const vector<byte>& identity, const vector<byte>& subtitle, const vector<byte>& body)
-{
-try
-{
     Json::Value root;
 
     /**
@@ -100,49 +42,37 @@ try
     root["profitToday"] = "Reserved";//今日收益
     root["profitTotal"] = "Reserved";//累计收益
 
-    const auto& branchInfo = stationInfo->branchList[0];// 暂时只统计第一分支
-    const auto& bauStatusSummary = branchInfo->bauInfo.bauStatusSummary;
-
+    const auto& bauStatusSummary = stationInfo.bauMap_[0].bauStatusSummary;
     root["soc"] = to_string(bauStatusSummary.soc);
     root["chargeCapacityToday"] = "Reserved";     //今日充电量
     root["dischargeCapacityToday"] = "Reserved";  //今日放电量
-    root["chargeCapacityTotal"] = miscellaneous::formatedPrecision(bauStatusSummary.chargeCapacitySum, 2);//累计充电量
-    root["dischargeCapacityTotal"] = miscellaneous::formatedPrecision(bauStatusSummary.dischargeCapacitySum, 2);//累计放电量
-    // merge_warningCountsByGrade(data);
-    // merge_bauWarningCounts(data);
-    // merge_pcsWarningCounts(data);
+    root["chargeCapacityTotal"] = stream_wrapper::serializeFloat(bauStatusSummary.chargeCapacitySum, 2);//累计充电量
+    root["dischargeCapacityTotal"] = stream_wrapper::serializeFloat(bauStatusSummary.dischargeCapacitySum, 2);//累计放电量
     root["bmsMode"] = "Reserved";
-    root["allowChargeCapacity"] = miscellaneous::formatedPrecision(bauStatusSummary.allowChargeCapacity, 2);
-    root["allowDischargeCapacity"] = miscellaneous::formatedPrecision(bauStatusSummary.allowDischargeCapacity, 2);
+    root["allowChargeCapacity"] = stream_wrapper::serializeFloat(bauStatusSummary.allowChargeCapacity, 2);
+    root["allowDischargeCapacity"] = stream_wrapper::serializeFloat(bauStatusSummary.allowDischargeCapacity, 2);
     root["deviceOnlineCounts"] = "Reserved";
 
-    auto& snapshot = stationInfo->powerRealtimeSnapshot;
+    auto& snapshot = stationInfo.powerRealtimeSnapshot;
     for(const auto& item: snapshot){
         Json::Value obj;
         obj["time"] = item.first;
-        obj["value"] = item.second;
+        obj["value"] = stream_wrapper::serializeFloat(item.second, 1);
         root["realPower"].append(obj);
     }
 
-    {
-        const vector<byte> repcontent = miscellaneous::serializedJsonAsBytes(root);
-        const pair<bool, vector<byte>> repbody{ true, repcontent };
-        const msgpack::sbuffer repbodySerialized = msgpackWrapper::pack(repbody);
-
-        zmq::message_t identitymsg(identity.data(), identity.size());
-        zmq::message_t repmsg(repbodySerialized.data(), repbodySerialized.size());
-        router.send(identitymsg, zmq::send_flags::sndmore);
-        router.send(repmsg, zmq::send_flags::none);
-    }
+    // 成功响应
+    Json::Value repJson;
+    repJson["data"] = root;
+    repJson["errcode"] = 0;
+    repJson["errmsg"] = "success";
+    utils::httpRespond(res, repJson);
 }
 catch(const std::exception& e){
-    const vector<byte> repcontent = miscellaneous::convertStringToBytes(e.what());
-    const pair<bool, vector<byte>> repbody{ false, repcontent };
-    const msgpack::sbuffer repbodySerialized = msgpackWrapper::pack(repbody);
-
-    zmq::message_t identitymsg(identity.data(), identity.size());
-    zmq::message_t repmsg(repbodySerialized.data(), repbodySerialized.size());
-    router.send(identitymsg, zmq::send_flags::sndmore);
-    router.send(repmsg, zmq::send_flags::none);
+    Json::Value msg;
+    msg["data"] = Json::Value(Json::objectValue);
+    msg["errcode"] = -1;
+    msg["errmsg"] = e.what();
+    utils::httpRespond(res, msg);
 }
 }

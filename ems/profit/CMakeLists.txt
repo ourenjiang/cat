@@ -7,7 +7,7 @@ ProfitHomepage.cpp
 
 add_library(profit ${profit_SRCS})
 target_link_libraries(profit
-cat_utils
+base
 sqlite3.a
 )
 
