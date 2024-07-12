@@ -103,6 +103,6 @@ link_directories(${YAMLCPP_PATH}/lib)
 add_subdirectory(utils)
 add_subdirectory(ems)
 
-install(TARGETS station
+install(TARGETS station_main
         RUNTIME DESTINATION bin
         LIBRARY DESTINATION lib)

@@ -51,14 +51,11 @@ struct ExecuteParams
     // 电池实时状态
     double batteryCurrentVolt;  // 电压
     double batteryCurrentCur;   // 电流
-    double batteryCurrentPower; // 功率
     int batteryCurrentSoc;      // SOC
 
     // 电池推荐状态
-    double batterySuggestChargeVolt;    // 充电电压
-    double batterySuggestChargeCur;     // 充电电流
-    double batterySuggestDischargeVolt; // 放电电压
-    double batterySuggestDischargeCur;  // 放电电流
+    bau::BatteryStatus batteryChargeStatus;     // 充电状态
+    bau::BatteryStatus batteryDischargeStatus;  // 放电状态
 
     // PCS实时状态
     double pcsCurrentSettingPower;  // 功率设置值

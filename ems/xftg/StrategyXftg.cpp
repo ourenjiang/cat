@@ -390,17 +390,13 @@ std::optional<vector<uint8_t>> StrategyXftg::getActionWhenCharge(const ExecutePa
         userSuggestSoc = params.allowSocMax;
     }
 
-    // 获取电池推荐充电状态
-    const auto batteryChargeStatus = bauStatus_.getChargeStatus(params.batteryCurrentVolt, params.batteryCurrentCur,
-                                                                params.batterySuggestChargeVolt, params.batterySuggestChargeCur);
-
     // 电池推荐：降功率 => 降功率：结束
-    if(batteryChargeStatus == bau::BatteryStatus::SuggestDown){
+    if(params.batteryChargeStatus == bau::BatteryStatus::SuggestDown){
         return verifyChargeWithBatterySuggestPowerDown(params.pcsCurrentSettingPower);
     }
 
     // 电池推荐：稳定输出
-    if(batteryChargeStatus == bau::BatteryStatus::Stable){
+    if(params.batteryChargeStatus == bau::BatteryStatus::Stable){
         
         return verifyChargeWithBatterySuggestPowerStable(params.userSuggestStatus,
                                                     userSuggestPower, params.pcsCurrentSettingPower,
@@ -408,7 +404,7 @@ std::optional<vector<uint8_t>> StrategyXftg::getActionWhenCharge(const ExecutePa
     }
 
     // 电池推荐：提高功率
-    if(batteryChargeStatus == bau::BatteryStatus::SuggestUp){
+    if(params.batteryChargeStatus == bau::BatteryStatus::SuggestUp){
         return verifyChargeWithBatterySuggestPowerUp(params.userSuggestStatus,
                                                 userSuggestPower, params.pcsCurrentSettingPower,
                                                 userSuggestSoc, params.batteryCurrentSoc);
@@ -439,23 +435,20 @@ std::optional<vector<uint8_t>> StrategyXftg::getActionWhenDischarge(const Execut
         userSuggestSoc = params.allowSocMin;
     }
 
-    // 获取电池推荐充电状态
-    const auto batteryDischargeStatus = bauStatus_.getDischargeStatus(params.batteryCurrentVolt, params.batteryCurrentCur,
-                                                                            params.batterySuggestDischargeVolt, params.batterySuggestDischargeCur);
     // 电池推荐：降功率 => 降功率：结束
-    if(batteryDischargeStatus == bau::BatteryStatus::SuggestDown){
+    if(params.batteryDischargeStatus == bau::BatteryStatus::SuggestDown){
         return verifyDischargeWithBatterySuggestPowerDown(params.pcsCurrentSettingPower);
     }
 
     // 电池推荐：稳定输出
-    if(batteryDischargeStatus == bau::BatteryStatus::Stable){
+    if(params.batteryDischargeStatus == bau::BatteryStatus::Stable){
         return verifyDischargeWithBatterySuggestPowerStable(params.userSuggestStatus,
                                                         userSuggestPower, params.pcsCurrentSettingPower,
                                                         userSuggestSoc, params.batteryCurrentSoc);
     }
 
     // 电池推荐：提高功率
-    if(batteryDischargeStatus == bau::BatteryStatus::SuggestUp){
+    if(params.batteryDischargeStatus == bau::BatteryStatus::SuggestUp){
         return verifyDischargeWithBatterySuggestPowerUp(params.userSuggestStatus,
                                                     userSuggestPower, params.pcsCurrentSettingPower,
                                                     userSuggestSoc, params.batteryCurrentSoc);
@@ -497,12 +490,17 @@ void StrategyXftg::doUpdateInfo(const bau::BauInfo& bauInfo, const pcs::PcsInfo&
     // 提取策略所依赖的系统实时参数
     const double batteryCurrentVolt = bau.bauStatusSummary.volt;
     const double batteryCurrentCur = bau.bauStatusSummary.cur;
-    const double batteryCurrentPower = batteryCurrentVolt * batteryCurrentCur * 0.001;// kW
+    const int batteryCurrentSoc = bau.bauStatusSummary.soc;
+
     const double batterySuggestChargeVolt = bau.bauStatusSummary.pcsRequestChargeVolt;
     const double batterySuggestChargeCur = bau.bauStatusSummary.pcsRequestChargeCur;
     const double batterySuggestDischargeVolt = bau.bauStatusSummary.pcsRequestDischargeVolt;
     const double batterySuggestDischargeCur = bau.bauStatusSummary.pcsRequestDischargeCur;
-    const int batteryCurrentSoc = bau.bauStatusSummary.soc;
+    const auto batteryChargeStatus = bauStatus_.getChargeStatus(batteryCurrentVolt, batteryCurrentCur,
+                                                                batterySuggestChargeVolt, batterySuggestChargeCur);
+    const auto batteryDischargeStatus = bauStatus_.getDischargeStatus(batteryCurrentVolt, batteryCurrentCur,
+                                                                            batterySuggestDischargeVolt, batterySuggestDischargeCur);
+
     const uint32_t batteryBauThirdProtectStatus = bau.bauStatusSummary.protectStatusL3;
     const uint32_t batteryBauFaultStatus = bau.bauStatusSummary.faultStatus;
     const uint32_t batteryBingjiThirdProtectStatus = bau.bingjiStatusSummary.protectStatusL3;
@@ -522,8 +520,9 @@ void StrategyXftg::doUpdateInfo(const bau::BauInfo& bauInfo, const pcs::PcsInfo&
     const int allowSocMax = protectParams.socMax;
     const int allowSocMin = protectParams.socMin;
 
-    xftg::ExecuteParams params{batteryCurrentVolt, batteryCurrentCur, batteryCurrentPower, batteryCurrentSoc,
-                                batterySuggestChargeVolt, batterySuggestChargeCur, batterySuggestDischargeVolt, batterySuggestDischargeCur,
+    xftg::ExecuteParams params{batteryCurrentVolt, batteryCurrentCur, batteryCurrentSoc,
+                                batteryChargeStatus, batteryDischargeStatus,
+                                // batterySuggestChargeVolt, batterySuggestChargeCur, batterySuggestDischargeVolt, batterySuggestDischargeCur,
                                 pcsCurrentSettingPower, pcsCurrentOutputPower, pcsCurrentStatus,
                                 userSuggestStatus, userSuggestPower, userSuggestSoc,
                                 allowChargePowerMax, allowDischargePowerMax, allowSocMax, allowSocMin,
