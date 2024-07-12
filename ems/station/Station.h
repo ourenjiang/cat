@@ -1,7 +1,6 @@
 #pragma once
 #include "Model.h"
 #include "utils/zeromq.h"
-// #include "ems/branch/EnergyBranch.h"
 
 /**
  * 两件事：
