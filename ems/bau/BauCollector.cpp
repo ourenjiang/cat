@@ -49,6 +49,9 @@ try
     pollBcuFrame();
     pollBmuFrame();
 
+    // 统计'可运行'、'可充电'、'可放电'的能力
+    calcWorkAbility();
+
     // 向上发布数据
     auto serializedBody = msgpackWrapper::pack(bauInfo_);
     stationDealer_->send(zmq::message_t(string("Station")), zmq::send_flags::sndmore);
@@ -102,6 +105,7 @@ BingjiStatusSummary BauCollector::createBingjiStatusSummary(const vector<uint16_
     summary.protectStatusL2 = modbus::getU32(0x0204, 0x0200, frameRegisters);
     summary.protectStatusL3 = modbus::getU32(0x0206, 0x0200, frameRegisters);
     summary.faultStatus = modbus::getU32(0x0208, 0x0200, frameRegisters);
+    summary.specialStatus = modbus::getU32(0x0212, 0x0200, frameRegisters);
     return summary;
 }
 
@@ -750,4 +754,163 @@ BcuStatusSummary BauCollector::createBcuStatusSummary(const vector<uint16_t>& fr
     }
     summary.celltemMinAddr = modbus::getU16(0x0332, 0x0300, frameRegisters);
     return summary;
+}
+
+void BauCollector::calcWorkAbility()
+{
+    const auto& bauStatusSummary = bauInfo_.bauStatusSummary;
+    const auto& bingjiStatusSummary = bauInfo_.bingjiStatusSummary;
+    const uint32_t bauThirdProtectStatus = bauStatusSummary.protectStatusL3;
+    const uint32_t bauFaultStatus = bauStatusSummary.faultStatus;
+    const uint32_t bingjiThirdProtectStatus = bingjiStatusSummary.protectStatusL3;
+    const uint32_t bingjiFaultStatus = bingjiStatusSummary.faultStatus;
+    const uint32_t bingjiSpecialStatus = bingjiStatusSummary.specialStatus;
+    bauInfo_.allowRunning = allowRunning(bauThirdProtectStatus, bauFaultStatus, bingjiThirdProtectStatus, bingjiFaultStatus);
+    bauInfo_.allowCharge = allowCharge(bauThirdProtectStatus, bingjiThirdProtectStatus, bingjiSpecialStatus);
+    bauInfo_.allowDischarge = allowDischarge(bauThirdProtectStatus, bingjiThirdProtectStatus, bingjiSpecialStatus);
+}
+
+bool BauCollector::allowRunning(const uint32_t bauThirdProtectStatus, const uint32_t bauFaultStatus, const uint32_t bingjiThirdProtectStatus, const uint32_t bingjiFaultStatus)
+{
+    {
+        /** 检查'BAU三级保护状态'中属于故障的状态：
+         * 环境高温
+         * 环境低温
+         * 负极继电器高温
+         * 正极绝缘漏电
+         * 负极绝缘漏电
+         * 端子高温
+         * 簇间压差
+        */
+        const bitset<25> faultBits("00000000001100100110000110000000");
+        if(bauThirdProtectStatus & faultBits.to_ulong()) return false;
+    }
+    {
+        /** 检查'BAU故障状态'中属于故障的状态:
+         * CAN总线异常
+         * RS485异常
+         * BCU版本异常
+         * BCU地址异常
+        */
+        const bitset<5> faultBits("11110");
+        if(bauFaultStatus & faultBits.to_ulong()) return false;
+    }
+    {
+        /** 检查'BCU三级保护状态'中属于故障的状态:
+         * 环境高温
+         * 环境低温
+         * 负极继电器高温
+         * 正极绝缘漏电
+         * 负极绝缘漏电
+         * 电芯升温
+         * 电芯采样
+         * NTC采样异常
+         * 端子高温
+         */ 
+        const bitset<25> faultBits("000000000011001001100001111");
+        if(bingjiThirdProtectStatus & faultBits.to_ulong()) return false;
+    }
+    {
+        /** 检查'BCU故障状态'中属于故障的状态:
+         * 略。（所有）
+        */
+        const bitset<5> faultBits("111111111111111111111111111");
+        if(bingjiFaultStatus & faultBits.to_ulong()) return false;
+    }
+    return true;
+}
+
+/*
+检查是否有充电能力:
+    注意，该动作应该在 verifyNormal()返回为真的条件之下，才有必要执行；
+    先检查BAU这一级的三级保护状态中所有属于'充电故障'的标志位；
+    再遍历BAU下面的所有BCU的三级保护状态中所有属于'充电故障'的标志位；
+    以上所有均验证通过，才表示'有充电能力'
+*/
+bool BauCollector::allowCharge(const uint32_t bauThirdProtectStatus, const uint32_t bingjiThirdProtectStatus, const uint32_t specialStatus)
+{
+    {
+        /** 检查'BAU三级保护状态'中属于禁充的状态:
+         * 单体高压
+         * 总体高压
+         * 充电过流
+         * 充电高温
+         * 充电低温
+         * 充电继电器高温
+         * SOC高
+         * 充电压差
+         * 充电温差
+         */
+        const bitset<25> stopChargeBits("1010101010001001000101000");
+        if(bauThirdProtectStatus & stopChargeBits.to_ulong()) return false;
+    }
+    {
+        /** 检查'BCU三级保护状态'中属于禁充的状态:
+         * 单体高压
+         * 总体高压
+         * 充电过流
+         * 充电高温
+         * 充电低温
+         * 充电继电器高温
+         * SOC高
+         * 充电压差
+         * 充电温差
+        */
+        const bitset<25> stopChargeBits("1010101010001001000101000");
+        if(bingjiThirdProtectStatus & stopChargeBits.to_ulong()) return false;
+    }
+    {
+        /** 检查'BCU特殊状态'中属于禁充的状态:
+         * PCS禁充
+        */
+        const bitset<7> stopChargeBits("0000010");
+        if(specialStatus & stopChargeBits.to_ulong()) return false;
+    }
+    return true;
+}
+
+/*
+检查是否有放电能力:
+    与检查充电能力类似，需要验证BAU及其下管理的所有BCU的状态，所有校验都通过才表示'有放电能力'
+*/
+bool BauCollector::allowDischarge(const uint32_t bauThirdProtectStatus, uint32_t bingjiThirdProtectStatus, const uint32_t specialStatus)
+{
+    {
+        /** 检查'BAU三级保护状态'中属于禁放的状态:
+         * 单体低压
+         * 总体低压
+         * 放电过流
+         * 放电高温
+         * 放电低温
+         * 放电继电器高温
+         * SOC低
+         * 放电压差
+         * 放电温差
+         */
+        const bitset<25> stopDischargeBits("0101010101000100100010100");
+        if(bauThirdProtectStatus & stopDischargeBits.to_ulong()) return false;
+    }
+    {
+        /** 检查'BCU三级保护状态'中属于禁放的状态:
+         * 单体低压
+         * 总体低压
+         * 放电过流
+         * 放电高温
+         * 放电低温
+         * 放电继电器高温
+         * SOC低
+         * 放电压差
+         * 放电温差
+        */
+        const bitset<25> stopDischargeBits("0101010101000100100010100");
+        if(bingjiThirdProtectStatus & stopDischargeBits.to_ulong()) return false;
+    }
+    {
+        /** 检查'BCU特殊状态'中属于禁放的状态:
+         * PCS禁放
+        */
+        const bitset<7> stopDischargeBits("0000001");
+        if(specialStatus & stopDischargeBits.to_ulong()) return false;
+    }
+    return true;
 }

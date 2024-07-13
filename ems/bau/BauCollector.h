@@ -55,7 +55,10 @@ private:
 
     optional<vector<byte>> sendAndRecv(const vector<uint8_t>& msg);
 
-    bool isExistWarningOrFault(const int warning1Count, const int warning2Count, const int warning3Count, const int faultCount);
+    void calcWorkAbility();
+    bool allowRunning(const uint32_t bauThirdProtectStatus, const uint32_t bauFaultStatus, const uint32_t bingjiThirdProtectStatus, const uint32_t bingjiFaultStatus);
+    bool allowCharge(const uint32_t bauThirdProtectStatus, const uint32_t bingjiThirdProtectStatus, const uint32_t specialStatus);// 检查是否有充电能力
+    bool allowDischarge(const uint32_t bauThirdProtectStatus, const uint32_t bingjiThirdProtectStatus, const uint32_t specialStatus);// 检查是否有放电能力
 
     BauInfo bauInfo_;
     std::shared_ptr<zmq::socket_t> stationDealer_;

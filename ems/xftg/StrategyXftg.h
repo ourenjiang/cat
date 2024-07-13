@@ -48,6 +48,11 @@ struct WeekPlanInfo
 
 struct ExecuteParams
 {
+    // 电池运行能力
+    bool bauAllowRunning;
+    bool bauAllowCharge;
+    bool bauAllowDischarge;
+
     // 电池实时状态
     double batteryCurrentVolt;  // 电压
     double batteryCurrentCur;   // 电流
@@ -72,11 +77,6 @@ struct ExecuteParams
     double allowDischargePowerMax;  // 允许最大放电功率
     int allowSocMax;                // 允许最大SOC
     int allowSocMin;                // 允许最小SOC
-
-    uint32_t batteryBauThirdProtectStatus;
-    uint32_t batteryBauFaultStatus;
-    uint32_t batteryBingjiThirdProtectStatus;
-    uint32_t batteryBingjiFaultStatus;
 };
 
 class StrategyXftg

@@ -101,9 +101,9 @@ void StrategyXftg::control(const StationInfo& stationInfo)
     doUpdateInfo(stationInfo.bauMap_.at(0), stationInfo.pcsMap_.at(0));
 
     // 发出控制命令
-    stationDealer_->send(zmq::message_t(string("BAU0")), zmq::send_flags::sndmore);// devId
-    stationDealer_->send(zmq::message_t(string("Strategy0")), zmq::send_flags::sndmore);// return id
-    stationDealer_->send(createMsg(0xd700, 0), zmq::send_flags::none);
+    // stationDealer_->send(zmq::message_t(string("BAU0")), zmq::send_flags::sndmore);// devId
+    // stationDealer_->send(zmq::message_t(string("Strategy0")), zmq::send_flags::sndmore);// return id
+    // stationDealer_->send(createMsg(0xd700, 0), zmq::send_flags::none);
 }
 
 zmq::message_t StrategyXftg::createMsg(const uint16_t regAddress, const uint16_t regData)
@@ -247,44 +247,6 @@ void StrategyXftg::start()
     while(true){
         doWork();
     }});
-
-    
-    // zmq::poll(pollitems_.data(), pollitems_.size(), std::chrono::seconds(3));
-    // for(int index = 0; index < pollitems_.size(); ++index){
-    //     const bool isReadable = static_cast<bool>(pollitems_[index].revents & ZMQ_POLLIN);
-    //     if(!isReadable)
-    //         continue;
-    //     if(index == 0){
-    //         // 接收
-    //         zmq::message_t topic;
-    //         (void)branchDealer_->recv(topic);
-    //         const string topicString(static_cast<char*>(topic.data()), topic.size());
-            
-    //         if(topicString == "UpdateInfo"){
-    //             // 解析得到整个分支的最新数据
-    //             zmq::message_t body;
-    //             (void)branchDealer_->recv(body);
-    //             const string bodyString(static_cast<char*>(body.data()), body.size());
-                
-    //             BranchInfo branchInfo;
-    //             const bool unpackResult = msgpackWrapper::unpack(body.data(), body.size(), branchInfo);
-    //             BOOST_ASSERT(unpackResult);
-    //             doUpdateInfo(branchInfo);
-    //         }
-    //         else if(topicString == "Xftg"){// 修改削峰填谷缓存参数
-
-    //             zmq::message_t body;
-    //             (void)branchDealer_->recv(body);
-    //             const string bodyString(static_cast<char*>(body.data()), body.size());
-    //             if(bodyString == "DayPlanDuration"){
-    //                 loadDayPlanDurationInfo();
-    //             }
-    //             else if(bodyString == "AuthRun"){
-    //                 loadAutoRun();
-    //             }
-    //         }
-    //     }
-    // }
 }
 
 vector<uint8_t> StrategyXftg::getFramePowerOff()
@@ -370,7 +332,7 @@ vector<uint8_t> StrategyXftg::getFrameChangeActivePower(const string& status, co
 std::optional<vector<uint8_t>> StrategyXftg::getActionWhenCharge(const ExecuteParams& params)
 {
     // 禁止充电
-    if(!bauStatus_.verifyChargeAbility(params.batteryBauThirdProtectStatus, params.batteryBingjiThirdProtectStatus)){
+    if(!params.bauAllowCharge){
         // 降低功率
         double newPower = params.pcsCurrentSettingPower;
         if(newPower > 1.0) newPower -= 1.0;
@@ -415,7 +377,7 @@ std::optional<vector<uint8_t>> StrategyXftg::getActionWhenCharge(const ExecutePa
 std::optional<vector<uint8_t>> StrategyXftg::getActionWhenDischarge(const ExecuteParams& params)
 {
     // 禁止放电
-    if(!bauStatus_.verifyDischargeAbility(params.batteryBauThirdProtectStatus, params.batteryBingjiThirdProtectStatus)){
+    if(!params.bauAllowDischarge){
         // 降低功率
         double newPower = params.pcsCurrentSettingPower;
         if(newPower > 1.0) newPower -= 1.0;
@@ -501,10 +463,9 @@ void StrategyXftg::doUpdateInfo(const bau::BauInfo& bauInfo, const pcs::PcsInfo&
     const auto batteryDischargeStatus = bauStatus_.getDischargeStatus(batteryCurrentVolt, batteryCurrentCur,
                                                                             batterySuggestDischargeVolt, batterySuggestDischargeCur);
 
-    const uint32_t batteryBauThirdProtectStatus = bau.bauStatusSummary.protectStatusL3;
-    const uint32_t batteryBauFaultStatus = bau.bauStatusSummary.faultStatus;
-    const uint32_t batteryBingjiThirdProtectStatus = bau.bingjiStatusSummary.protectStatusL3;
-    const uint32_t batteryBingjiFaultStatus = bau.bingjiStatusSummary.faultStatus;
+    const bool bauAllowRunning = bau.allowRunning;
+    const bool bauAllowCharge = bau.allowCharge;
+    const bool bauAllowDischarge = bau.allowDischarge;
 
     const double pcsCurrentSettingPower = pcs.frame_0474_04D0_summary.activePowerSetting;
     const double pcsCurrentOutputPower = pcs.frame_0474_04D0_summary.activePowerSetting;
@@ -520,13 +481,12 @@ void StrategyXftg::doUpdateInfo(const bau::BauInfo& bauInfo, const pcs::PcsInfo&
     const int allowSocMax = protectParams.socMax;
     const int allowSocMin = protectParams.socMin;
 
-    xftg::ExecuteParams params{batteryCurrentVolt, batteryCurrentCur, batteryCurrentSoc,
+    xftg::ExecuteParams params{bauAllowRunning, bauAllowCharge, bauAllowDischarge,
+                                batteryCurrentVolt, batteryCurrentCur, batteryCurrentSoc,
                                 batteryChargeStatus, batteryDischargeStatus,
-                                // batterySuggestChargeVolt, batterySuggestChargeCur, batterySuggestDischargeVolt, batterySuggestDischargeCur,
                                 pcsCurrentSettingPower, pcsCurrentOutputPower, pcsCurrentStatus,
                                 userSuggestStatus, userSuggestPower, userSuggestSoc,
-                                allowChargePowerMax, allowDischargePowerMax, allowSocMax, allowSocMin,
-                                batteryBauThirdProtectStatus, batteryBauFaultStatus, batteryBingjiThirdProtectStatus, batteryBingjiFaultStatus };
+                                allowChargePowerMax, allowDischargePowerMax, allowSocMax, allowSocMin };
     ///////////////////////////////////////////////////////////////////////////////////////////
 
     auto frameResult = doWork(params);
@@ -547,8 +507,7 @@ std::optional<vector<uint8_t>> StrategyXftg::doWork(const ExecuteParams& params)
     /////////////////////////////////////////////////////////////////
 
     // 告警、故障位检查
-    if(!bauStatus_.verifyNormal(params.batteryBauThirdProtectStatus, params.batteryBauFaultStatus,
-                                    params.batteryBingjiThirdProtectStatus, params.batteryBingjiFaultStatus)){
+    if(!params.bauAllowRunning){
         if(params.pcsCurrentStatus.powerTotal)// 告警、故障产生，需要关机
             return getFramePowerOff();
         return {};// 已经关机了，直接退出。

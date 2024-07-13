@@ -18,7 +18,7 @@ struct CellvoltSummary
     Volt cellvoltMin;// 最小电压
     uint16_t voltDiff;// 压差
 
-    MSGPACK_DEFINE(cellvoltList);
+    MSGPACK_DEFINE(cellvoltList, cellvoltMax, cellvoltMin, voltDiff)
 };
 
 struct CelltemSummary
@@ -32,7 +32,7 @@ struct CelltemSummary
     Tem celltemMin;// 最小温度
     uint16_t temDiff;// 温差
 
-    MSGPACK_DEFINE(cellTemList, terminalTemList);
+    MSGPACK_DEFINE(cellTemList, terminalTemList, celltemMax, celltemMin, temDiff)
 };
 
 struct BmuInfo
@@ -308,8 +308,9 @@ struct BingjiStatusSummary
     uint32_t protectStatusL2;// 2级保护状态
     uint32_t protectStatusL3;// 3级保护状态
     uint32_t faultStatus;    // 故障状态
+    uint32_t specialStatus;  // 特殊状态
 
-    MSGPACK_DEFINE(protectStatusL1, protectStatusL2, protectStatusL3, faultStatus);
+    MSGPACK_DEFINE(protectStatusL1, protectStatusL2, protectStatusL3, faultStatus, specialStatus)
 };
 
 struct BauInfo
@@ -332,9 +333,14 @@ struct BauInfo
     int faultCount;     // 故障数量
     bool existActiveWarningOrFault;
 
+    bool allowRunning;      // 可运行
+    bool allowCharge;       // 可充电
+    bool allowDischarge;    // 可放电
+
     MSGPACK_DEFINE(bingjiStatusSummary, bauStatusSummary, bcuList,
                     warningStatus, faultStatus, existActiveWarningOrFault,
-                    warningL1Count, warningL2Count, warningL3Count, faultCount);
+                    warningL1Count, warningL2Count, warningL3Count, faultCount,
+                    allowRunning, allowCharge, allowDischarge);
 };
 
 /////////////////////////////////////////////////////////////////////////////////////
