@@ -16,6 +16,9 @@ set(EXECUTABLE_OUTPUT_PATH ${CMAKE_BINARY_DIR}/bin)
 set(LIBRARY_OUTPUT_PATH ${CMAKE_BINARY_DIR}/lib)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
+# 编译器参数
+add_compile_options(-Wfatal-errors)    # 减少模板代码错误导致的错误信息冗杂的问题
+
 #安装路径
 set(CMAKE_INSTALL_PREFIX ${CMAKE_BINARY_DIR}/install)
 #添加运行库路径(注意：多个路径之间以分号隔开)
