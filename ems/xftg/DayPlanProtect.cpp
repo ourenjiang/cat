@@ -5,25 +5,22 @@
 #include "sqlite_modern_cpp.h"
 #include "ems/base/UserManager.h"
 #include "ems/interface/OperationRecord.h"
+#include "ems/base/OperationRecord.h"
 #include "utils/AuthException.h"
 #include "utils/Miscellaneous.h"
 #include "utils/MsgpackWrapper_src.hpp"
 #include "utils/datetime.h"
 #include "utils/jsonWrapper.h"
+#include "ems/base/Database.h"
 
+using namespace ems;
 using namespace ems::xftg;
 
 void DayPlanProtect::createTable()
 {
 try
 {
-    const string projectPath{ "/opt/paceic_ems_server/main" };
-    const string dbPath{ projectPath + "/db" };
-    BOOST_ASSERT(filesystem::is_directory(dbPath));
-
-    const string filename{ dbPath + "/Xftg.sqlite" };
-    sqlite::database XftgDb(filename);
-
+    auto XftgDb = base::Database::open("/Xftg.sqlite");
     XftgDb << "CREATE TABLE IF NOT EXISTS XFTG_DAYPLAN_PROTECT("
                 "NAME TEXT PRIMARY KEY,"
                 "SOC_MAX TEXT,"
@@ -42,12 +39,7 @@ void DayPlanProtect::insertIntoDefaultRecord()
 {
 try
 {
-    const string projectPath{ "/opt/paceic_ems_server/main" };
-    const string dbPath{ projectPath + "/db" };
-    BOOST_ASSERT(filesystem::is_directory(dbPath));
-
-    const string filename{ dbPath + "/Xftg.sqlite" };
-    sqlite::database XftgDb(filename);
+    auto XftgDb = base::Database::open("/Xftg.sqlite");
 
     int recordCount{0};
     XftgDb << "SELECT COUNT(*) FROM XFTG_DAYPLAN_PROTECT;" >> recordCount;
@@ -69,7 +61,8 @@ catch(const std::exception& e){
 }
 }
 
-void DayPlanProtect::requestCallbackPost(const httplib::Request &req, httplib::Response &res, shared_ptr<zmq::socket_t> stationDealer)
+void DayPlanProtect::requestCallbackPost(const httplib::Request &req, httplib::Response &res,
+                                    shared_ptr<zmq::socket_t> dataDealer, shared_ptr<zmq::socket_t> cmdDealer)
 {
 try
 {
@@ -92,12 +85,7 @@ try
     const string dischargePowerMax = reqbody["dischargePowerMax"].asString();
 
     // 操作数据库
-    const string projectPath{ "/opt/paceic_ems_server/main" };
-    const string dbPath{ projectPath + "/db" };
-    BOOST_ASSERT(filesystem::is_directory(dbPath));
-
-    const string filename{ dbPath + "/Xftg.sqlite" };
-    sqlite::database XftgDb(filename);
+    auto XftgDb = base::Database::open("/Xftg.sqlite");
 
     // 检查记录是否已存在
     int recordCount{ 0 };
@@ -107,27 +95,31 @@ try
         throw AuthException("记录已存在", usernameAuth);
 
     XftgDb << "INSERT INTO XFTG_DAYPLAN_PROTECT ("
-                "NAME, "
-                "SOC_MAX, SOC_MIN, "
-                "TRANSFORMER_POWER_MAX, "
-                "POWER_STEP_SIZE, "
-                "CHARGE_POWER_MAX, DISCHARGE_POWER_MAX) "
+                "NAME, SOC_MAX, SOC_MIN, TRANSFORMER_POWER_MAX, "
+                "POWER_STEP_SIZE, CHARGE_POWER_MAX, DISCHARGE_POWER_MAX) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?);"
             << dayPlanName
             << socMax << socMin
             << transformerPowerMax << powerStepSize
             << chargePowerMax << dischargePowerMax;
 
-    // stationDealer->send(zmq::message_t(postSubtitle_), zmq::send_flags::sndmore);
-    // stationDealer->send(zmq::message_t(), zmq::send_flags::none);
-    
-    // 保存'成功'操作记录
-    const string status = "success";
-    const string content{ "success" };
-    const string type{ "参数设置" };
-    const string timestamp = datetime::getCurrentTimestamp();
-    const string username = datetime::getCurrentTimestamp();
-    // OperationRecord::insertRecord(status, content, type, timestamp, username);
+    // 通知站点重新加载数据
+    cmdDealer->send(zmq::message_t(string("Strategy0Set")), zmq::send_flags::sndmore);
+    cmdDealer->send(zmq::message_t(string("InterfaceCmd")), zmq::send_flags::sndmore);
+    cmdDealer->send(zmq::message_t(string("DayPlanProtect")), zmq::send_flags::none);
+
+    // 响应
+    zmq::message_t deviceBody;
+    (void)cmdDealer->recv(deviceBody);
+
+    // 解析消息
+    pair<bool, string> respondMsg;
+    const bool unpackMsgResult = msgpackWrapper::unpack(deviceBody.data(), deviceBody.size(), respondMsg);
+    BOOST_ASSERT(unpackMsgResult);
+    const auto& [returnStatus, returnContent] = respondMsg;
+    if(!returnStatus)
+        throw std::runtime_error("modbus respond failed");
+    base::OperationRecord::insertRecord("success", "添加削峰填谷保护计划", "参数设置", usernameAuth);
 
     // 成功响应
     Json::Value repJson;
@@ -143,7 +135,8 @@ catch(const std::exception& e){
 }
 }
 
-void DayPlanProtect::requestCallbackGet(const httplib::Request &req, httplib::Response &res, shared_ptr<zmq::socket_t> stationDealer)
+void DayPlanProtect::requestCallbackGet(const httplib::Request &req, httplib::Response &res,
+                                    shared_ptr<zmq::socket_t> dataDealer, shared_ptr<zmq::socket_t> cmdDealer)
 {
 try
 {
@@ -153,16 +146,17 @@ try
     const auto getResult = getRecord(name);
     if(!getResult.has_value())
         throw std::runtime_error("record not exists");
+    const auto& [socMax, socMin, transformerPowerMax,
+        powerStepSize, chargePowerMax, dischargePowerMax] = getResult.value();
 
-    Record record = getResult.value();
     Json::Value root;
     root["name"] = dayPlanName;
-    root["socMax"] = std::get<0>(record);
-    root["socMin"] = std::get<1>(record);
-    root["transformerPowerMax"] = std::get<2>(record);
-    root["powerStepSize"] = std::get<3>(record);
-    root["chargePowerMax"] = std::get<4>(record);
-    root["dischargePowerMax"] = std::get<5>(record);
+    root["socMax"] = socMax;
+    root["socMin"] = socMin;
+    root["transformerPowerMax"] = transformerPowerMax;
+    root["powerStepSize"] = powerStepSize;
+    root["chargePowerMax"] = chargePowerMax;
+    root["dischargePowerMax"] = dischargePowerMax;
 
     Json::Value respondContent;
     respondContent["data"] = root;
@@ -179,25 +173,19 @@ catch(const std::exception& e){
 }
 }
 
-void DayPlanProtect::requestCallbackGetNameList(const httplib::Request &req, httplib::Response &res, shared_ptr<zmq::socket_t> stationDealer)
+void DayPlanProtect::requestCallbackGetNameList(const httplib::Request &req, httplib::Response &res,
+                                    shared_ptr<zmq::socket_t> dataDealer, shared_ptr<zmq::socket_t> cmdDealer)
 {
 try
 {
-    const string projectPath{ "/opt/paceic_ems_server/main" };
-    const string dbPath{ projectPath + "/db" };
-    BOOST_ASSERT(filesystem::is_directory(dbPath));
-
-    const string filename{ dbPath + "/Xftg.sqlite" };
-    sqlite::database XftgDb(filename);
+    auto XftgDb = base::Database::open("/Xftg.sqlite");
 
     // 查询
     Json::Value namelist(Json::arrayValue);
-    XftgDb << "SELECT "
-                "DISTINCT NAME "// 注意去重
-                "FROM XFTG_DAYPLAN_PROTECT;"
-    >> [&](string name){
-            namelist.append(name);
-        };
+    XftgDb << "SELECT DISTINCT NAME FROM XFTG_DAYPLAN_PROTECT;"// 注意去重
+            >> [&](string name){
+                    namelist.append(name);
+                };
     if(namelist.empty())
         throw std::runtime_error("record not exists");
 
@@ -216,7 +204,8 @@ catch(const std::exception& e){
 }
 }
 
-void DayPlanProtect::requestCallbackDelete(const httplib::Request &req, httplib::Response &res, shared_ptr<zmq::socket_t> stationDealer)
+void DayPlanProtect::requestCallbackDelete(const httplib::Request &req, httplib::Response &res,
+                                    shared_ptr<zmq::socket_t> dataDealer, shared_ptr<zmq::socket_t> cmdDealer)
 {
 try
 {
@@ -229,12 +218,7 @@ try
     const string dayPlanName = reqbody["name"].asString();
 
     // 数据库操作
-    const string projectPath{ "/opt/paceic_ems_server/main" };
-    const string dbPath{ projectPath + "/db" };
-    BOOST_ASSERT(filesystem::is_directory(dbPath));
-
-    const string filename{ dbPath + "/Xftg.sqlite" };
-    sqlite::database XftgDb(filename);
+    auto XftgDb = base::Database::open("/Xftg.sqlite");
 
     {
         // 检查记录是否存在
@@ -257,8 +241,23 @@ try
     // 执行删除
     XftgDb << "DELETE FROM XFTG_DAYPLAN_PROTECT WHERE NAME = ?;" << dayPlanName;
 
-    // stationDealer->send(zmq::message_t(deleteSubtitle_), zmq::send_flags::sndmore);
-    // stationDealer->send(zmq::message_t(), zmq::send_flags::none);
+    // 通知站点重新加载数据
+    cmdDealer->send(zmq::message_t(string("Strategy0Set")), zmq::send_flags::sndmore);
+    cmdDealer->send(zmq::message_t(string("InterfaceCmd")), zmq::send_flags::sndmore);
+    cmdDealer->send(zmq::message_t(string("DayPlanProtect")), zmq::send_flags::none);
+
+    // 响应
+    zmq::message_t deviceBody;
+    (void)cmdDealer->recv(deviceBody);
+
+    // 解析消息
+    pair<bool, string> respondMsg;
+    const bool unpackMsgResult = msgpackWrapper::unpack(deviceBody.data(), deviceBody.size(), respondMsg);
+    BOOST_ASSERT(unpackMsgResult);
+    const auto& [returnStatus, returnContent] = respondMsg;
+    if(!returnStatus)
+        throw std::runtime_error("modbus respond failed");
+    base::OperationRecord::insertRecord("success", "删除削峰填谷保护计划", "参数设置", usernameAuth);
 
     Json::Value respondContent;
     respondContent["errcode"] = 0;
@@ -273,7 +272,8 @@ catch(const std::exception& e){
 }
 }
 
-void DayPlanProtect::requestCallbackPut(const httplib::Request &req, httplib::Response &res, shared_ptr<zmq::socket_t> stationDealer)
+void DayPlanProtect::requestCallbackPut(const httplib::Request &req, httplib::Response &res,
+                                    shared_ptr<zmq::socket_t> dataDealer, shared_ptr<zmq::socket_t> cmdDealer)
 {
 try
 {
@@ -296,12 +296,7 @@ try
     const string dischargePowerMax = reqbody["dischargePowerMax"].asString();
     
     // 数据库操作
-    const string projectPath{ "/opt/paceic_ems_server/main" };
-    const string dbPath{ projectPath + "/db" };
-    BOOST_ASSERT(filesystem::is_directory(dbPath));
-
-    const string filename{ dbPath + "/Xftg.sqlite" };
-    sqlite::database XftgDb(filename);
+    auto XftgDb = base::Database::open("/Xftg.sqlite");
 
     // 检查记录是否已存在
     int recordCount{ 0 };
@@ -311,25 +306,31 @@ try
         throw AuthException("记录不存在", usernameAuth);
 
     XftgDb << "UPDATE XFTG_DAYPLAN_PROTECT SET "
-                        "SOC_MAX = ?, SOC_MIN = ?, "
-                        "TRANSFORMER_POWER_MAX = ?, POWER_STEP_SIZE = ?, "
-                        "CHARGE_POWER_MAX = ?, DISCHARGE_POWER_MAX = ? "
-                        "WHERE NAME = ?;"
-                    << socMax << socMin
-                    << transformerPowerMax << powerStepSize
-                    << chargePowerMax << dischargePowerMax
-                    << dayPlanName;
+                "SOC_MAX = ?, SOC_MIN = ?, TRANSFORMER_POWER_MAX = ?, "
+                "POWER_STEP_SIZE = ?, CHARGE_POWER_MAX = ?, DISCHARGE_POWER_MAX = ? "
+                "WHERE NAME = ?;"
+            << socMax << socMin
+            << transformerPowerMax << powerStepSize
+            << chargePowerMax << dischargePowerMax
+            << dayPlanName;
 
-    // stationDealer->send(zmq::message_t(putSubtitle_), zmq::send_flags::sndmore);
-    // stationDealer->send(zmq::message_t(), zmq::send_flags::none);
+    // 通知站点重新加载数据
+    cmdDealer->send(zmq::message_t(string("Strategy0Set")), zmq::send_flags::sndmore);
+    cmdDealer->send(zmq::message_t(string("InterfaceCmd")), zmq::send_flags::sndmore);
+    cmdDealer->send(zmq::message_t(string("DayPlanProtect")), zmq::send_flags::none);
 
-    // 保存'成功'操作记录
-    const string status = "success";
-    const string content{ "success" };
-    const string type{ "参数设置" };
-    const string timestamp = datetime::getCurrentTimestamp();
-    const string username = datetime::getCurrentTimestamp();
-    // OperationRecord::insertRecord(status, content, type, timestamp, username);
+    // 响应
+    zmq::message_t deviceBody;
+    (void)cmdDealer->recv(deviceBody);
+
+    // 解析消息
+    pair<bool, string> respondMsg;
+    const bool unpackMsgResult = msgpackWrapper::unpack(deviceBody.data(), deviceBody.size(), respondMsg);
+    BOOST_ASSERT(unpackMsgResult);
+    const auto& [returnStatus, returnContent] = respondMsg;
+    if(!returnStatus)
+        throw std::runtime_error("modbus respond failed");
+    base::OperationRecord::insertRecord("success", "修改削峰填谷保护计划", "参数设置", usernameAuth);
 
     // 成功响应
     Json::Value repJson;
@@ -349,33 +350,22 @@ std::optional<DayPlanProtect::Record> DayPlanProtect::getRecord(const string& na
 {
 try
 {
-    /* code */
-    const string projectPath{ "/opt/paceic_ems_server/main" };
-    const string dbPath{ projectPath + "/db" };
-    BOOST_ASSERT(filesystem::is_directory(dbPath));
-
-    const string filename{ dbPath + "/Xftg.sqlite" };
-    sqlite::database XftgDb(filename);
+    auto XftgDb = base::Database::open("/Xftg.sqlite");
 
     // 准备结果集
     std::optional<Record> optValue;
 
     // 查询
-    XftgDb << "SELECT "
-                "SOC_MAX, SOC_MIN, "
-                "TRANSFORMER_POWER_MAX, "
-                "POWER_STEP_SIZE, "
-                "CHARGE_POWER_MAX, DISCHARGE_POWER_MAX "
-                "FROM XFTG_DAYPLAN_PROTECT "
-                "WHERE NAME = ?;"
+    XftgDb << "SELECT SOC_MAX, SOC_MIN, TRANSFORMER_POWER_MAX, POWER_STEP_SIZE, "
+                "CHARGE_POWER_MAX, DISCHARGE_POWER_MAX FROM XFTG_DAYPLAN_PROTECT WHERE NAME = ?;"
             << name
-    >> [&](string socMax_, string socMin_,
-            string transformerPowerMax_, string powerStepSize_,
-            string chargePowerMax_, string dischargePowerMax_){
-                optValue.emplace(socMax_, socMin_, 
-                                    transformerPowerMax_, powerStepSize_,
-                                    chargePowerMax_, dischargePowerMax_);
-            };
+            >> [&](string socMax_, string socMin_,
+                    string transformerPowerMax_, string powerStepSize_,
+                    string chargePowerMax_, string dischargePowerMax_){
+                        optValue.emplace(socMax_, socMin_, 
+                                        transformerPowerMax_, powerStepSize_,
+                                        chargePowerMax_, dischargePowerMax_);
+                    };
     return optValue;
 }
 catch(const std::exception& e){
@@ -386,34 +376,27 @@ return {};
 
 std::optional<map<string, DayPlanProtect::Record>> DayPlanProtect::getAllRecord()
 {
-    try
-    {
-        /* code */
-        const string projectPath{ "/opt/paceic_ems_server/main" };
-        const string dbPath{ projectPath + "/db" };
-        BOOST_ASSERT(filesystem::is_directory(dbPath));
+try
+{
+    auto XftgDb = base::Database::open("/Xftg.sqlite");
 
-        const string filename{ dbPath + "/Xftg.sqlite" };
-        sqlite::database XftgDb(filename);
+    // 准备结果集
+    map<string, Record> records;
 
-        // 准备结果集
-        map<string, Record> records;
-
-        // 查询
-        XftgDb << "SELECT * FROM XFTG_DAYPLAN_PROTECT;"
-                                >> [&](string name, string socMax, string socMin,
-                                        string transformerPowerMax, string powerStepSize,
-                                        string chargePowerMax, string dischargePowerMax){
-                                            
-                                            records.emplace(name,
-                                                            make_tuple(socMax, socMin, 
-                                                                transformerPowerMax, powerStepSize,
-                                                                chargePowerMax, dischargePowerMax));
-                                        };
-                                return records;
-    }
-    catch(const std::exception& e){
-        std::cerr << e.what() << '\n';
-    }
+    // 查询
+    XftgDb << "SELECT * FROM XFTG_DAYPLAN_PROTECT;"
+            >> [&](string name, string socMax, string socMin,
+                    string transformerPowerMax, string powerStepSize,
+                    string chargePowerMax, string dischargePowerMax){
+                        records.emplace(name,
+                                        make_tuple(socMax, socMin, 
+                                            transformerPowerMax, powerStepSize,
+                                            chargePowerMax, dischargePowerMax));
+                    };
+    return records;
+}
+catch(const std::exception& e){
+    std::cerr << e.what() << '\n';
+}
     return {};
 }

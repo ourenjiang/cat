@@ -1,6 +1,5 @@
 set(interface_SRCS
 Interface.cpp
-InterfaceBuilder.cpp
 HttpServer.cpp
 UserManager.cpp
 MainWiringDiagram.cpp

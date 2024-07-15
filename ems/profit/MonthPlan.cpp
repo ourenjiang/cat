@@ -11,6 +11,7 @@
 #include "utils/AuthException.h"
 #include "utils/datetime.h"
 #include "utils/jsonWrapper.h"
+#include "ems/base/Database.h"
 
 using namespace ems;
 using namespace ems::electricity_price;
@@ -19,19 +20,7 @@ void MonthPlan::createTable()
 {
 try
 {
-    const string projectPath{ "/opt/paceic_ems_server/main" };
-    const string dbPath{ projectPath + "/db" };
-    BOOST_ASSERT(filesystem::is_directory(dbPath));
-
-    const string filename{ dbPath + "/ElectricityPrice.sqlite" };
-    sqlite::database ElectricityPriceDb(filename);
-
-    /**
-     * 后期优化注解：
-     *      1, 拼接列定义时，可以先使用vector将其缓存，然后再与SQL语句进行组合
-     *      2, jian_input等列实际业务数据类型应为浮点类型，当前原型开发阶段暂时统一为字符串类型
-     *      3, ...
-    */
+    auto ElectricityPriceDb = base::Database::open("/ElectricityPrice.sqlite");
     ElectricityPriceDb << "CREATE TABLE IF NOT EXISTS ELECTRICITY_PRICE_MONTHPLAN("
                             "NAME TEXT PRIMARY KEY,"
                             "MONTH_NO TEXT,"
@@ -47,17 +36,12 @@ void MonthPlan::insertIntoDefaultRecord()
 {
 try
 {
-    const string projectPath{ "/opt/paceic_ems_server/main" };
-    const string dbPath{ projectPath + "/db" };
-    BOOST_ASSERT(filesystem::is_directory(dbPath));
+    auto ElectricityPriceDb = base::Database::open("/ElectricityPrice.sqlite");
 
-    const string filename{ dbPath + "/ElectricityPrice.sqlite" };
-    sqlite::database ElectricityPriceDb(filename);
-
-    // ElectricityPriceDb << "DELETE FROM ELECTRICITY_PRICE_MONTHPLAN;";// clear old records
+    // 如果存在旧记录，则不添加新的默认记录
     int recordCount{0};
     ElectricityPriceDb << "SELECT COUNT(*) FROM ELECTRICITY_PRICE_MONTHPLAN;" >> recordCount;
-    if(recordCount == 0) return;
+    if(recordCount > 0) return;
 
     ElectricityPriceDb << "INSERT INTO ELECTRICITY_PRICE_MONTHPLAN ("
                             "NAME, MONTH_NO, DAYPLAN_NAME, TYPELIST_NAME) "
@@ -113,7 +97,8 @@ catch(const std::exception& e){
 }
 }
 
-void MonthPlan::requestCallbackPost(const httplib::Request &req, httplib::Response &res, shared_ptr<zmq::socket_t> stationDealer)
+void MonthPlan::requestCallbackPost(const httplib::Request &req, httplib::Response &res,
+                                    shared_ptr<zmq::socket_t> dataDealer, shared_ptr<zmq::socket_t> cmdDealer)
 {
 try
 {
@@ -131,12 +116,7 @@ try
     const string typeListName = reqbody["typeListName"].asString();
     
     // 操作数据库
-    const string projectPath{ "/opt/paceic_ems_server/main" };
-    const string dbPath{ projectPath + "/db" };
-    BOOST_ASSERT(filesystem::is_directory(dbPath));
-
-    const string filename{ dbPath + "/ElectricityPrice.sqlite" };
-    sqlite::database ElectricityPriceDb(filename);
+    auto ElectricityPriceDb = base::Database::open("/ElectricityPrice.sqlite");
 
     // 检查记录是否已存在
     int monthPlanRecordCount{ 0 };
@@ -201,11 +181,12 @@ catch(const std::exception& e){
 }
 }
 
-void MonthPlan::requestCallbackGet(const httplib::Request &req, httplib::Response &res, shared_ptr<zmq::socket_t> stationDealer)
+void MonthPlan::requestCallbackGet(const httplib::Request &req, httplib::Response &res,
+                                    shared_ptr<zmq::socket_t> dataDealer, shared_ptr<zmq::socket_t> cmdDealer)
 {
     // 不提供名称时，将请求转发至获取全部记录接口
     if(!req.has_param("name")){
-        requestCallbackGetAll(req, res, stationDealer);
+        requestCallbackGetAll(req, res, dataDealer, cmdDealer);
         return;
     }
 
@@ -213,12 +194,7 @@ try
 {
     const string name = req.get_param_value("name");
 
-    const string projectPath{ "/opt/paceic_ems_server/main" };
-    const string dbPath{ projectPath + "/db" };
-    BOOST_ASSERT(filesystem::is_directory(dbPath));
-
-    const string filename{ dbPath + "/ElectricityPrice.sqlite" };
-    sqlite::database ElectricityPriceDb(filename);
+    auto ElectricityPriceDb = base::Database::open("/ElectricityPrice.sqlite");
 
     // 准备查询结果
     optional<RecordWithName> record;
@@ -257,16 +233,12 @@ catch(const std::exception& e){
 }
 }
 
-void MonthPlan::requestCallbackGetAll(const httplib::Request &req, httplib::Response &res, shared_ptr<zmq::socket_t> stationDealer)
+void MonthPlan::requestCallbackGetAll(const httplib::Request &req, httplib::Response &res,
+                                    shared_ptr<zmq::socket_t> dataDealer, shared_ptr<zmq::socket_t> cmdDealer)
 {
 try
 {
-    const string projectPath{ "/opt/paceic_ems_server/main" };
-    const string dbPath{ projectPath + "/db" };
-    BOOST_ASSERT(filesystem::is_directory(dbPath));
-
-    const string filename{ dbPath + "/ElectricityPrice.sqlite" };
-    sqlite::database ElectricityPriceDb(filename);
+    auto ElectricityPriceDb = base::Database::open("/ElectricityPrice.sqlite");
 
     // 查询
     vector<RecordWithName> recordList;
@@ -303,7 +275,8 @@ catch(const std::exception& e){
 }
 }
 
-void MonthPlan::requestCallbackDelete(const httplib::Request &req, httplib::Response &res, shared_ptr<zmq::socket_t> stationDealer)
+void MonthPlan::requestCallbackDelete(const httplib::Request &req, httplib::Response &res,
+                                    shared_ptr<zmq::socket_t> dataDealer, shared_ptr<zmq::socket_t> cmdDealer)
 {
 try
 {
@@ -316,12 +289,7 @@ try
     const string monthPlanName = reqbody["name"].asString();
 
     // 数据库操作
-    const string projectPath{ "/opt/paceic_ems_server/main" };
-    const string dbPath{ projectPath + "/db" };
-    BOOST_ASSERT(filesystem::is_directory(dbPath));
-
-    const string filename{ dbPath + "/ElectricityPrice.sqlite" };
-    sqlite::database ElectricityPriceDb(filename);
+    auto ElectricityPriceDb = base::Database::open("/ElectricityPrice.sqlite");
 
     // 检查记录是否存在
     int recordCount{0};
@@ -350,7 +318,8 @@ catch(const std::exception& e){
 }
 }
 
-void MonthPlan::requestCallbackPut(const httplib::Request &req, httplib::Response &res, shared_ptr<zmq::socket_t> stationDealer)
+void MonthPlan::requestCallbackPut(const httplib::Request &req, httplib::Response &res,
+                                    shared_ptr<zmq::socket_t> dataDealer, shared_ptr<zmq::socket_t> cmdDealer)
 {
 try
 {
@@ -367,12 +336,7 @@ try
     const string dayPlanName = reqbody["dayPlanName"].asString();
     const string typeListName = reqbody["typeListName"].asString();
 
-    const string projectPath{ "/opt/paceic_ems_server/main" };
-    const string dbPath{ projectPath + "/db" };
-    BOOST_ASSERT(filesystem::is_directory(dbPath));
-
-    const string filename{ dbPath + "/ElectricityPrice.sqlite" };
-    sqlite::database ElectricityPriceDb(filename);
+    auto ElectricityPriceDb = base::Database::open("/ElectricityPrice.sqlite");
 
     // 查询记录是否存在
     int recordCount{0};
@@ -436,142 +400,4 @@ catch(const std::exception& e){
     respondmsg["errmsg"] = e.what();
     utils::httpRespond(res, respondmsg);
 }
-}
-
-void MonthPlan::deleteRecord(const string& name)
-{
-try
-{
-    const string projectPath{ "/opt/paceic_ems_server/main" };
-    const string dbPath{ projectPath + "/db" };
-    BOOST_ASSERT(filesystem::is_directory(dbPath));
-
-    const string filename{ dbPath + "/ElectricityPrice.sqlite" };
-    sqlite::database ElectricityPriceDb(filename);
-
-    // 检查记录是否存在
-    int recordCount{0};
-    ElectricityPriceDb << "SELECT COUNT(*) FROM ELECTRICITY_PRICE_MONTHPLAN WHERE NAME = ?;"
-        << name >> recordCount;
-    if(recordCount == 0)
-        throw std::runtime_error("记录不存在");
-
-    // 执行删除
-    ElectricityPriceDb << "DELETE FROM ELECTRICITY_PRICE_MONTHPLAN "
-                            "WHERE NAME = ?;"
-                        << name;
-}
-catch(const std::exception& e){
-    std::cerr << e.what() << '\n';
-}
-}
-
-void MonthPlan::modifyRecord(const string& name, const string& monthNo,
-                    const string& dayPlanName, const string& typeListName)
-{
-try
-{
-    const string projectPath{ "/opt/paceic_ems_server/main" };
-    const string dbPath{ projectPath + "/db" };
-    BOOST_ASSERT(filesystem::is_directory(dbPath));
-
-    const string filename{ dbPath + "/ElectricityPrice.sqlite" };
-    sqlite::database ElectricityPriceDb(filename);
-
-    /** 先查询旧记录 */
-    using TempRecord = tuple<string, string, string>;
-    std::optional<TempRecord> optValue;
-
-    // 查询
-    int recordCount{0};
-    ElectricityPriceDb << "SELECT COUNT(*) FROM ELECTRICITY_PRICE_MONTHPLAN WHERE NAME = ?;"
-        << name >> recordCount;
-    if(recordCount == 0)
-        throw std::runtime_error("记录不存在");
-    
-    ElectricityPriceDb << "UPDATE ELECTRICITY_PRICE_MONTHPLAN SET "
-                            "MONTH_NO = ?, "
-                            "DAYPLAN_NAME = ?, "
-                            "TYPELIST_NAME = ? "
-                            "WHERE NAME = ?;"
-                        << monthNo
-                        << dayPlanName << typeListName
-                        << name;
-}
-catch(const std::exception& e){
-    std::cerr << e.what() << '\n';
-}
-}
-
-std::optional<MonthPlan::Record> MonthPlan::getRecord(const string& name)
-{
-    Json::Value finalResult;
-    try
-    {
-        /* code */
-        const string projectPath{ "/opt/paceic_ems_server/main" };
-        const string dbPath{ projectPath + "/db" };
-        BOOST_ASSERT(filesystem::is_directory(dbPath));
-
-        const string filename{ dbPath + "/ElectricityPrice.sqlite" };
-        sqlite::database ElectricityPriceDb(filename);
-
-        std::optional<std::tuple<string, string, string>> optValue;
-
-        // 查询
-        ElectricityPriceDb << "SELECT "
-                              "MONTH_NO, "
-                              "DAYPLAN_NAME, TYPELIST_NAME "
-                              "FROM ELECTRICITY_PRICE_MONTHPLAN "
-                              "WHERE NAME = ?;"
-                            << name
-        >> [&](string monthNo_,
-                string durationName_, string priceName_){
-                    
-                    optValue.emplace(monthNo_, durationName_, priceName_);
-                };
-        return optValue;
-    }
-    catch(const std::exception& e){
-        std::cerr << e.what() << '\n';
-    }
-    return {};
-}
-
-optional<vector<MonthPlan::RecordWithName>> MonthPlan::getAllRecord()
-{
-    try
-    {
-        /* code */
-        const string projectPath{ "/opt/paceic_ems_server/main" };
-        const string dbPath{ projectPath + "/db" };
-        BOOST_ASSERT(filesystem::is_directory(dbPath));
-
-        const string filename{ dbPath + "/ElectricityPrice.sqlite" };
-        sqlite::database ElectricityPriceDb(filename);
-
-        // 准备查询结果
-        vector<RecordWithName> records;
-
-        // 查询
-        ElectricityPriceDb << "SELECT "
-                              "NAME, "
-                              "MONTH_NO, "
-                              "DAYPLAN_NAME, TYPELIST_NAME "
-                              "FROM ELECTRICITY_PRICE_MONTHPLAN;"
-        >> [&](string name, 
-                string monthNo,
-                string dayPlanName, string typeListName){
-                    
-                    records.emplace_back(name, monthNo, dayPlanName, typeListName);
-                };
-        
-        if(!records.empty())
-            return optional<vector<RecordWithName>>(records);
-    }
-    catch(const std::exception& e)
-    {
-        std::cerr << e.what() << '\n';
-    }
-    return {};
 }

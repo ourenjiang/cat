@@ -19,7 +19,6 @@ logger:
     { name: CollectorPcs, priority: DEBUG },
     { name: Interface, priority: DEBUG },
     { name: Xftg, priority: DEBUG },
-    { name: Monitor, priority: DEBUG },
     { name: Station, priority: DEBUG }
 ]
 

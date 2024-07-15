@@ -6,10 +6,12 @@
 #include "utils/MsgpackWrapper_src.hpp"
 #include "utils/Miscellaneous.h"
 #include "utils/jsonWrapper.h"
+#include "ems/base/Database.h"
 
 using namespace ems;
 
-void OperationRecord::requestCallbackGet(const httplib::Request &req, httplib::Response &res, shared_ptr<zmq::socket_t> stationDealer)
+void OperationRecord::requestCallbackGet(const httplib::Request &req, httplib::Response &res,
+                                    shared_ptr<zmq::socket_t> dataDealer, shared_ptr<zmq::socket_t> cmdDealer)
 {
 try
 {
@@ -25,14 +27,8 @@ try
     const string endTime = reqbody.isMember("endTime") ? reqbody["endTime"].asString() : "";
     const string userName = reqbody.isMember("userName") ? reqbody["userName"].asString() : "";
 
+
     // 准备请求参数
-    const string projectPath{ "/opt/paceic_ems_server/main" };
-    const string dbPath{ projectPath + "/db" };
-    BOOST_ASSERT(filesystem::is_directory(dbPath));
-
-    const string filename{ dbPath + "/OperationRecord.sqlite" };
-    sqlite::database OperationRecordDb(filename);
-
     const string patternStatus = status + "%";
     const string patternType = type + "%";
     const string patternBeginTimestamp = beginTime.empty() ? "1900-01-01 00:00:00" : beginTime;
@@ -43,8 +39,10 @@ try
     const string patternLimit = pageSize;
     const string patternOffset = to_string(std::stoi(pageSize) * std::stoi(pageIndex));
 
-    // 查询
     vector<OperationRecordInfo> records;
+    auto OperationRecordDb = base::Database::open("/OperationRecord.sqlite");
+    
+    // 查询
     OperationRecordDb << "SELECT "
                             "STATUS, CONTENT, TYPE, CREATE_TIME, USERNAME "
                             "FROM OPERATION_RECORD "
@@ -98,7 +96,8 @@ catch(const std::exception& e){
 }
 }
 
-void OperationRecord::requestCallbackGetPageInfo(const httplib::Request &req, httplib::Response &res, shared_ptr<zmq::socket_t> stationDealer)
+void OperationRecord::requestCallbackGetPageInfo(const httplib::Request &req, httplib::Response &res,
+                                    shared_ptr<zmq::socket_t> dataDealer, shared_ptr<zmq::socket_t> cmdDealer)
 {
 try
 {
@@ -113,21 +112,14 @@ try
     const string endTime = reqbody.isMember("endTime") ? reqbody["endTime"].asString() : "";
     const string userName = reqbody.isMember("userName") ? reqbody["userName"].asString() : "";
 
-    // 数据库操作
-    const string projectPath{ "/opt/paceic_ems_server/main" };
-    const string dbPath{ projectPath + "/db" };
-    BOOST_ASSERT(filesystem::is_directory(dbPath));
-
-    const string filename{ dbPath + "/OperationRecord.sqlite" };
-    sqlite::database OperationRecordDb(filename);
-
-    vector<OperationRecordInfo> records;
-
     const string patternStatus = status + '%';
     const string patternType = type + '%';
     const string patternBeginTimestamp = beginTime.empty() ? "1900-01-01" : beginTime;
     const string patternEndTimestamp = endTime.empty() ? "2050-01-01" : endTime;
     const string patternUserName = userName + '%';
+
+    // 数据库操作
+    auto OperationRecordDb = base::Database::open("/OperationRecord.sqlite");
 
     // 查询
     int recordCounts;
@@ -181,19 +173,7 @@ void OperationRecord::createTable()
 {
 try
 {
-    const string projectPath{ "/opt/paceic_ems_server/main" };
-    const string dbPath{ projectPath + "/db" };
-    BOOST_ASSERT(filesystem::is_directory(dbPath));
-
-    const string filename{ dbPath + "/OperationRecord.sqlite" };
-    sqlite::database OperationRecordDb(filename);
-
-    /**
-     * 后期优化注解：
-     *      1, 拼接列定义时，可以先使用vector将其缓存，然后再与SQL语句进行组合
-     *      2, jian_input等列实际业务数据类型应为浮点类型，当前原型开发阶段暂时统一为字符串类型
-     *      3, ...
-    */
+    auto OperationRecordDb = base::Database::open("/OperationRecord.sqlite");
     OperationRecordDb << "CREATE TABLE IF NOT EXISTS OPERATION_RECORD("
                             "ID INTEGER PRIMARY KEY AUTOINCREMENT,"
                             "STATUS TEXT,"
@@ -211,14 +191,12 @@ void OperationRecord::insertIntoDefaultRecord()
 {
 try
 {
-    const string projectPath{ "/opt/paceic_ems_server/main" };
-    const string dbPath{ projectPath + "/db" };
-    BOOST_ASSERT(filesystem::is_directory(dbPath));
+    auto OperationRecordDb = base::Database::open("/OperationRecord.sqlite");
 
-    const string filename{ dbPath + "/OperationRecord.sqlite" };
-    sqlite::database OperationRecordDb(filename);
-
-    OperationRecordDb << "DELETE FROM OPERATION_RECORD;";// clear old records
+    // 如果存在旧记录，则不添加新的默认记录
+    int recordCount{0};
+    OperationRecordDb << "SELECT COUNT(*) FROM OPERATION_RECORD;" >> recordCount;
+    if(recordCount > 0) return;
 
     OperationRecordDb << "INSERT INTO OPERATION_RECORD (STATUS, CONTENT, TYPE, CREATE_TIME, USERNAME) VALUES (?, ?, ?, ?, ?);"
                         << "成功" << "测试内容1" << "参数设置" << "2024-06-12" << "root";

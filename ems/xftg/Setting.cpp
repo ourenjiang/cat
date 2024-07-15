@@ -10,11 +10,45 @@
 #include "utils/jsonWrapper.h"
 #include "utils/zeromq.h"
 #include "ems/base/StationInfo.h"
+#include "ems/base/Database.h"
 
 using namespace ems;
 using namespace ems::xftg;
 
-void Setting::requestCallbackGet(const httplib::Request &req, httplib::Response &res, shared_ptr<zmq::socket_t> stationDealer)
+void Setting::createTable()
+{
+try
+{
+    auto XftgDb = base::Database::open("/Xftg.sqlite");
+    XftgDb << "CREATE TABLE IF NOT EXISTS AUTO_RUN("
+                "BRANCH_INDEX TEXT PRIMARY KEY,"
+                "FLAG TEXT);";
+}
+catch(const sqlite::sqlite_exception& e){
+    std::cerr << e.get_sql() << '\n';
+}
+}
+
+void Setting::insertIntoDefaultRecord()
+{
+try
+{
+    auto XftgDb = base::Database::open("/Xftg.sqlite");
+
+    int recordCount{0};
+    XftgDb << "SELECT COUNT(*) FROM AUTO_RUN;" >> recordCount;
+    if(recordCount > 0) return;
+
+    XftgDb << "INSERT INTO AUTO_RUN (BRANCH_INDEX, FLAG) VALUES (?, ?);"
+            << "0" << "false";
+}
+catch(const std::exception& e){
+    std::cerr << e.what() << '\n';
+}
+}
+
+void Setting::requestCallbackGet(const httplib::Request &req, httplib::Response &res,
+                                    shared_ptr<zmq::socket_t> dataDealer, shared_ptr<zmq::socket_t> cmdDealer)
 {
 try
 {
@@ -22,7 +56,11 @@ try
         throw std::runtime_error("invalud params");
     const string branchIndex = req.get_param_value("branchIndex");
 
-    auto stationInfo = base::getStationInfo(stationDealer);
+    auto stationInfo = base::getStationInfo(dataDealer);
+
+    auto& strategyMap = stationInfo.strategyMap_;
+    if(strategyMap.find(std::stoi(branchIndex)) == strategyMap.end())
+        throw std::runtime_error("策略不存在");
     auto& strategyInfo = stationInfo.strategyMap_.at(std::stoi(branchIndex));
 
     Json::Value data;
@@ -43,7 +81,8 @@ catch(const std::exception& e){
 }
 }
 
-void Setting::requestCallbackPut(const httplib::Request &req, httplib::Response &res, shared_ptr<zmq::socket_t> stationDealer)
+void Setting::requestCallbackPut(const httplib::Request &req, httplib::Response &res,
+                                    shared_ptr<zmq::socket_t> dataDealer, shared_ptr<zmq::socket_t> cmdDealer)
 {
 try
 {
@@ -53,18 +92,13 @@ try
     const string autoRunFlag = base::UserManager::getParam(body, "autoRun");
 
     // 操作数据库
-    const string projectPath{ "/opt/paceic_ems_server/main" };
-    const string dbPath{ projectPath + "/db" };
-    BOOST_ASSERT(filesystem::is_directory(dbPath));
-
-    const string filename{ dbPath + "/Xftg.sqlite" };
-    sqlite::database XftgDb(filename);
+    auto XftgDb = base::Database::open("/Xftg.sqlite");
 
     // 检查记录是否存在
     int recordCount{ 0 };
     XftgDb << "SELECT COUNT(*) FROM AUTO_RUN WHERE BRANCH_INDEX = ?;"
         << branchIndex >> recordCount;
-    if(recordCount == 0)    
+    if(recordCount == 0)
         throw std::runtime_error("request params err");
     
     // 执行修改
@@ -72,13 +106,12 @@ try
             << autoRunFlag << branchIndex;
 
     // 通知中心
-    stationDealer->send(zmq::message_t(), zmq::send_flags::sndmore);
-    stationDealer->send(zmq::message_t(string("Strategy0")), zmq::send_flags::sndmore);
-    stationDealer->send(zmq::message_t(string("Interface")), zmq::send_flags::sndmore);
-    stationDealer->send(zmq::message_t(string("AutoRun")), zmq::send_flags::none);
+    cmdDealer->send(zmq::message_t(string("Strategy0Set")), zmq::send_flags::sndmore);
+    cmdDealer->send(zmq::message_t(string("InterfaceCmd")), zmq::send_flags::sndmore);
+    cmdDealer->send(zmq::message_t(string("AutoRun")), zmq::send_flags::none);
     // 响应
     zmq::message_t deviceBody;
-    (void)stationDealer->recv(deviceBody);
+    (void)cmdDealer->recv(deviceBody);
 
     // 解析消息
     pair<bool, vector<uint8_t>> respondMsg;
@@ -99,48 +132,6 @@ catch(const std::exception& e){
     respondmsg["errcode"] = -1;
     respondmsg["errmsg"] = e.what();
     utils::httpRespond(res, respondmsg);
-}
-}
-
-void Setting::createTable()
-{
-try
-{
-    const string projectPath{ "/opt/paceic_ems_server/main" };
-    const string dbPath{ projectPath + "/db" };
-    BOOST_ASSERT(filesystem::is_directory(dbPath));
-
-    const string filename{ dbPath + "/Xftg.sqlite" };
-    sqlite::database XftgDb(filename);
-
-    XftgDb << "CREATE TABLE IF NOT EXISTS AUTO_RUN("
-                "BRANCH_INDEX TEXT PRIMARY KEY,"
-                "FLAG TEXT);";
-}
-catch(const sqlite::sqlite_exception& e){
-    std::cerr << e.get_sql() << '\n';
-}
-}
-
-void Setting::insertIntoDefaultRecord()
-{
-try
-{
-    /* code */
-    const string projectPath{ "/opt/paceic_ems_server/main" };
-    const string dbPath{ projectPath + "/db" };
-    BOOST_ASSERT(filesystem::is_directory(dbPath));
-
-    const string filename{ dbPath + "/Xftg.sqlite" };
-    sqlite::database XftgDb(filename);
-
-    XftgDb << "DELETE FROM AUTO_RUN;";// clear old records
-
-    XftgDb << "INSERT INTO AUTO_RUN (BRANCH_INDEX, FLAG) VALUES (?, ?);"
-            << "0" << "true";
-}
-catch(const std::exception& e){
-    std::cerr << e.what() << '\n';
 }
 }
 

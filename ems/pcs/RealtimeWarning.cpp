@@ -14,7 +14,8 @@ RealtimeWarning::RealtimeWarning()
 {
 }
 
-void RealtimeWarning::requestCallback(const httplib::Request &req, httplib::Response &res, shared_ptr<zmq::socket_t> stationDealer)
+void RealtimeWarning::requestCallback(const httplib::Request &req, httplib::Response &res,
+                                    shared_ptr<zmq::socket_t> dataDealer, shared_ptr<zmq::socket_t> cmdDealer)
 {
 try
 {
@@ -22,7 +23,7 @@ try
         throw std::runtime_error("request params err");
     const string branchIndex = req.get_param_value("branchIndex");
     ////////////////////////////////////////////////////////////////
-    auto stationInfo = base::getStationInfo(stationDealer);
+    auto stationInfo = base::getStationInfo(dataDealer);
 
     // auto& branchList = stationInfo.branchList;
     // auto branchItr = branchList.find(std::stoi(branchIndex));

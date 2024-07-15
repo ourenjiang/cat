@@ -11,6 +11,7 @@
 #include "utils/AuthException.h"
 #include "utils/datetime.h"
 #include "utils/jsonWrapper.h"
+#include "ems/base/Database.h"
 
 using namespace ems;
 using namespace ems::xftg;
@@ -19,22 +20,16 @@ void WeekPlan::createTable()
 {
 try
 {
-    const string projectPath{ "/opt/paceic_ems_server/main" };
-    const string dbPath{ projectPath + "/db" };
-    BOOST_ASSERT(filesystem::is_directory(dbPath));
-
-    const string filename{ dbPath + "/Xftg.sqlite" };
-    sqlite::database XftgDb(filename);
-
+    auto XftgDb = base::Database::open("/Xftg.sqlite");
     XftgDb << "CREATE TABLE IF NOT EXISTS XFTG_WEEK_PLAN("
-                            "NAME TEXT PRIMARY KEY,"
-                            "DAYPLAN_DURATION_NAME TEXT,"
-                            "DAYPLAN_PROTECT_NAME TEXT,"
-                            "DAY_WHITE_LIST TEXT,"
-                            "VALID_DATE_BEGIN TEXT,"
-                            "VALID_DATE_END TEXT, "
-                            "PRIORITY TEXT, "
-                            "BIND_SYSTEM TEXT);";
+                "NAME TEXT PRIMARY KEY,"
+                "DAYPLAN_DURATION_NAME TEXT,"
+                "DAYPLAN_PROTECT_NAME TEXT,"
+                "DAY_WHITE_LIST TEXT,"
+                "VALID_DATE_BEGIN TEXT,"
+                "VALID_DATE_END TEXT, "
+                "PRIORITY TEXT, "
+                "BIND_SYSTEM TEXT);";
 }
 catch(const std::exception& e){
     std::cerr << e.what() << '\n';
@@ -45,51 +40,34 @@ void WeekPlan::insertIntoDefaultRecord()
 {
 try
 {
-    const string projectPath{ "/opt/paceic_ems_server/main" };
-    const string dbPath{ projectPath + "/db" };
-    BOOST_ASSERT(filesystem::is_directory(dbPath));
+    auto XftgDb = base::Database::open("/Xftg.sqlite");
 
-    const string filename{ dbPath + "/Xftg.sqlite" };
-    sqlite::database XftgDb(filename);
-
-    // XftgDb << "DELETE FROM XFTG_WEEK_PLAN;";// clear old records
     int recordCount{0};
     XftgDb << "SELECT COUNT(*) FROM XFTG_WEEK_PLAN;" >> recordCount;
     if(recordCount > 0) return;
 
     XftgDb << "INSERT INTO XFTG_WEEK_PLAN ("
-                "NAME, "
-                "DAYPLAN_DURATION_NAME, "
-                "DAYPLAN_PROTECT_NAME, "
-                "DAY_WHITE_LIST, "
-                "VALID_DATE_BEGIN, VALID_DATE_END, "
-                "PRIORITY, BIND_SYSTEM) "
+                "NAME, DAYPLAN_DURATION_NAME, DAYPLAN_PROTECT_NAME, "
+                "DAY_WHITE_LIST, VALID_DATE_BEGIN, VALID_DATE_END, PRIORITY, BIND_SYSTEM) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?);"
-                << "weekPlan1"
-                << "dayPlanDuration1" << "dayPlanProtect1"
+                << "weekPlan1" << "dayPlanDuration1" << "dayPlanProtect1"
                 << createDayOfWeekListString({ 1, 2, 3, 4, 5, 6, 7 })
-                << "1990-01-01" << "2050-01-01"
-                << "level1" << "branch1";
+                << "1990-01-01" << "2050-01-01" << "level1" << "branch1";
     XftgDb << "INSERT INTO XFTG_WEEK_PLAN ("
-                "NAME, "
-                "DAYPLAN_DURATION_NAME, "
-                "DAYPLAN_PROTECT_NAME, "
-                "DAY_WHITE_LIST, "
-                "VALID_DATE_BEGIN, VALID_DATE_END, "
-                "PRIORITY, BIND_SYSTEM) "
+                "NAME, DAYPLAN_DURATION_NAME, DAYPLAN_PROTECT_NAME, "
+                "DAY_WHITE_LIST, VALID_DATE_BEGIN, VALID_DATE_END, PRIORITY, BIND_SYSTEM) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?);"
-                << "weekPlan2"
-                << "dayPlanDuration2" << "dayPlanProtect2"
+                << "weekPlan2" << "dayPlanDuration2" << "dayPlanProtect2"
                 << createDayOfWeekListString({ 1, 2, 3, 4, 5, 6, 7 })
-                << "2024-01-01" << "2025-01-01"
-                << "level2" << "branch1";
+                << "2024-01-01" << "2025-01-01" << "level2" << "branch1";
 }
 catch(const std::exception& e){
     std::cerr << e.what() << '\n';
 }
 }
 
-void WeekPlan::requestCallbackPost(const httplib::Request &req, httplib::Response &res, shared_ptr<zmq::socket_t> stationDealer)
+void WeekPlan::requestCallbackPost(const httplib::Request &req, httplib::Response &res,
+                                    shared_ptr<zmq::socket_t> dataDealer, shared_ptr<zmq::socket_t> cmdDealer)
 {
 try
 {
@@ -114,12 +92,7 @@ try
     const string bindSystem = reqbody["bindSystem"].asString();
 
     // 操作数据库
-    const string projectPath{ "/opt/paceic_ems_server/main" };
-    const string dbPath{ projectPath + "/db" };
-    BOOST_ASSERT(filesystem::is_directory(dbPath));
-
-    const string filename{ dbPath + "/Xftg.sqlite" };
-    sqlite::database XftgDb(filename);
+    auto XftgDb = base::Database::open("/Xftg.sqlite");
 
     {
         // 检查记录是否已存在
@@ -147,28 +120,29 @@ try
     }
 
     XftgDb << "INSERT INTO XFTG_WEEK_PLAN ("
-                "NAME, "
-                "DAYPLAN_DURATION_NAME, "
-                "DAYPLAN_PROTECT_NAME, "
-                "DAY_WHITE_LIST, "
-                "VALID_DATE_BEGIN, VALID_DATE_END, "
-                "PRIORITY, BIND_SYSTEM) "
+                "NAME, DAYPLAN_DURATION_NAME, DAYPLAN_PROTECT_NAME, "
+                "DAY_WHITE_LIST, VALID_DATE_BEGIN, VALID_DATE_END, PRIORITY, BIND_SYSTEM) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?);"
-            << weekPlanName
-            << dayPlanDurationName << dayPlanProtectName
-            << dayWhiteList << validDateBegin << validDateEnd
-            << priority << bindSystem;
+            << weekPlanName << dayPlanDurationName << dayPlanProtectName
+            << dayWhiteList << validDateBegin << validDateEnd << priority << bindSystem;
 
-    // stationDealer->send(zmq::message_t(postSubtitle_), zmq::send_flags::sndmore);
-    // stationDealer->send(zmq::message_t(), zmq::send_flags::none);
+    // 通知站点重新加载数据
+    cmdDealer->send(zmq::message_t(string("Strategy0Set")), zmq::send_flags::sndmore);
+    cmdDealer->send(zmq::message_t(string("InterfaceCmd")), zmq::send_flags::sndmore);
+    cmdDealer->send(zmq::message_t(string("WeekPlan")), zmq::send_flags::none);
 
-    // 保存'成功'操作记录
-    const string status = "success";
-    const string content{ "success" };
-    const string type{ "参数设置" };
-    const string timestamp = datetime::getCurrentTimestamp();
-    const string username = datetime::getCurrentTimestamp();
-    // OperationRecord::insertRecord(status, content, type, timestamp, username);
+    // 响应
+    zmq::message_t deviceBody;
+    (void)cmdDealer->recv(deviceBody);
+
+    // 解析消息
+    pair<bool, string> respondMsg;
+    const bool unpackMsgResult = msgpackWrapper::unpack(deviceBody.data(), deviceBody.size(), respondMsg);
+    BOOST_ASSERT(unpackMsgResult);
+    const auto& [returnStatus, returnContent] = respondMsg;
+    if(!returnStatus)
+        throw std::runtime_error("modbus respond failed");
+    base::OperationRecord::insertRecord("success", "添加削峰填谷周计划", "参数设置", usernameAuth);
 
     // 成功响应
     Json::Value repJson;
@@ -184,19 +158,13 @@ catch(const std::exception& e){
 }
 }
 
-void WeekPlan::requestCallbackGet(const httplib::Request &req, httplib::Response &res, shared_ptr<zmq::socket_t> stationDealer)
+void WeekPlan::requestCallbackGet(const httplib::Request &req, httplib::Response &res,
+                                    shared_ptr<zmq::socket_t> dataDealer, shared_ptr<zmq::socket_t> cmdDealer)
 {
 try
 {
     const string weekPlanName = req.get_param_value("name");
-
-    const string projectPath{ "/opt/paceic_ems_server/main" };
-    const string dbPath{ projectPath + "/db" };
-    BOOST_ASSERT(filesystem::is_directory(dbPath));
-
-    const string filename{ dbPath + "/Xftg.sqlite" };
-    sqlite::database XftgDb(filename);
-
+    auto XftgDb = base::Database::open("/Xftg.sqlite");
     std::optional<Record> record;
 
     // 查询
@@ -239,16 +207,12 @@ catch(const std::exception& e){
 }
 }
 
-void WeekPlan::requestCallbackGetNameList(const httplib::Request &req, httplib::Response &res, shared_ptr<zmq::socket_t> stationDealer)
+void WeekPlan::requestCallbackGetNameList(const httplib::Request &req, httplib::Response &res,
+                                    shared_ptr<zmq::socket_t> dataDealer, shared_ptr<zmq::socket_t> cmdDealer)
 {
 try
 {
-    const string projectPath{ "/opt/paceic_ems_server/main" };
-    const string dbPath{ projectPath + "/db" };
-    BOOST_ASSERT(filesystem::is_directory(dbPath));
-
-    const string filename{ dbPath + "/Xftg.sqlite" };
-    sqlite::database XftgDb(filename);
+    auto XftgDb = base::Database::open("/Xftg.sqlite");
 
     // 查询
     Json::Value namelist(Json::arrayValue);
@@ -274,7 +238,8 @@ catch(const std::exception& e){
 }
 }
 
-void WeekPlan::requestCallbackDelete(const httplib::Request &req, httplib::Response &res, shared_ptr<zmq::socket_t> stationDealer)
+void WeekPlan::requestCallbackDelete(const httplib::Request &req, httplib::Response &res,
+                                    shared_ptr<zmq::socket_t> dataDealer, shared_ptr<zmq::socket_t> cmdDealer)
 {
 try
 {
@@ -287,12 +252,7 @@ try
     const string weekPlanName = reqbody["name"].asString();
 
     // 数据库操作
-    const string projectPath{ "/opt/paceic_ems_server/main" };
-    const string dbPath{ projectPath + "/db" };
-    BOOST_ASSERT(filesystem::is_directory(dbPath));
-
-    const string filename{ dbPath + "/Xftg.sqlite" };
-    sqlite::database XftgDb(filename);
+    auto XftgDb = base::Database::open("/Xftg.sqlite");
 
     // 检查记录是否存在
     int recordCount{0};
@@ -304,8 +264,23 @@ try
     // 执行删除
     XftgDb << "DELETE FROM XFTG_WEEK_PLAN WHERE NAME = ?;" << weekPlanName;
 
-    // stationDealer->send(zmq::message_t(deleteSubtitle_), zmq::send_flags::sndmore);
-    // stationDealer->send(zmq::message_t(), zmq::send_flags::none);
+    // 通知站点重新加载数据
+    cmdDealer->send(zmq::message_t(string("Strategy0Set")), zmq::send_flags::sndmore);// devId
+    cmdDealer->send(zmq::message_t(string("InterfaceCmd")), zmq::send_flags::sndmore);// return id
+    cmdDealer->send(zmq::message_t(string("WeekPlan")), zmq::send_flags::none);// topic
+
+    // 响应
+    zmq::message_t deviceBody;
+    (void)cmdDealer->recv(deviceBody);
+
+    // 解析消息
+    pair<bool, string> respondMsg;
+    const bool unpackMsgResult = msgpackWrapper::unpack(deviceBody.data(), deviceBody.size(), respondMsg);
+    BOOST_ASSERT(unpackMsgResult);
+    const auto& [returnStatus, returnContent] = respondMsg;
+    if(!returnStatus)
+        throw std::runtime_error("modbus respond failed");
+    base::OperationRecord::insertRecord("success", "删除周计划", "参数设置", usernameAuth);
 
     Json::Value respondContent;
     respondContent["errcode"] = 0;
@@ -321,7 +296,8 @@ catch(const std::exception& e)
 }
 }
 
-void WeekPlan::requestCallbackPut(const httplib::Request &req, httplib::Response &res, shared_ptr<zmq::socket_t> stationDealer)
+void WeekPlan::requestCallbackPut(const httplib::Request &req, httplib::Response &res,
+                                    shared_ptr<zmq::socket_t> dataDealer, shared_ptr<zmq::socket_t> cmdDealer)
 {
 try
 {
@@ -346,12 +322,7 @@ try
     const string bindSystem = reqbody["bindSystem"].asString();
 
     // 操作数据库
-    const string projectPath{ "/opt/paceic_ems_server/main" };
-    const string dbPath{ projectPath + "/db" };
-    BOOST_ASSERT(filesystem::is_directory(dbPath));
-
-    const string filename{ dbPath + "/Xftg.sqlite" };
-    sqlite::database XftgDb(filename);
+    auto XftgDb = base::Database::open("/Xftg.sqlite");
 
     {
         // 查询周计划记录是否存在
@@ -379,27 +350,31 @@ try
     }
 
     XftgDb << "UPDATE XFTG_WEEK_PLAN SET "
-                            "DAYPLAN_DURATION_NAME = ?, "
-                            "DAYPLAN_PROTECT_NAME = ?, "
-                            "DAY_WHITE_LIST = ?, "
-                            "VALID_DATE_BEGIN = ?, VALID_DATE_END = ?, "
-                            "PRIORITY = ?, BIND_SYSTEM = ? "
-                            "WHERE NAME = ?;"
-                        << dayPlanDurationName << dayPlanProtectName
-                        << dayWhiteList << validDateBegin << validDateEnd
-                        << priority << bindSystem
-                        << weekPlanName;
+                "DAYPLAN_DURATION_NAME = ?, DAYPLAN_PROTECT_NAME = ?, DAY_WHITE_LIST = ?, "
+                "VALID_DATE_BEGIN = ?, VALID_DATE_END = ?, PRIORITY = ?, BIND_SYSTEM = ? "
+                "WHERE NAME = ?;"
+            << dayPlanDurationName << dayPlanProtectName
+            << dayWhiteList << validDateBegin << validDateEnd
+            << priority << bindSystem
+            << weekPlanName;
 
-    // stationDealer->send(zmq::message_t(putSubtitle_), zmq::send_flags::sndmore);
-    // stationDealer->send(zmq::message_t(), zmq::send_flags::none);
+    // 通知站点重新加载数据
+    cmdDealer->send(zmq::message_t(string("Strategy0Set")), zmq::send_flags::sndmore);
+    cmdDealer->send(zmq::message_t(string("InterfaceCmd")), zmq::send_flags::sndmore);
+    cmdDealer->send(zmq::message_t(string("WeekPlan")), zmq::send_flags::none);
 
-    // 保存'成功'操作记录
-    const string status { "success" };
-    const string content{ "success" };
-    const string type{ "参数设置" };
-    const string timestamp = datetime::getCurrentTimestamp();
-    const string username = datetime::getCurrentTimestamp();
-    // OperationRecord::insertRecord(status, content, type, timestamp, username);
+    // 响应
+    zmq::message_t deviceBody;
+    (void)cmdDealer->recv(deviceBody);
+
+    // 解析消息
+    pair<bool, string> respondMsg;
+    const bool unpackMsgResult = msgpackWrapper::unpack(deviceBody.data(), deviceBody.size(), respondMsg);
+    BOOST_ASSERT(unpackMsgResult);
+    const auto& [returnStatus, returnContent] = respondMsg;
+    if(!returnStatus)
+        throw std::runtime_error("modbus respond failed");
+    base::OperationRecord::insertRecord("success", "修改削峰填谷周计划", "参数设置", usernameAuth);
 
     // 成功响应
     Json::Value repJson;
@@ -450,76 +425,45 @@ string WeekPlan::createDayOfWeekListString(const vector<int>& dayOfWeekList)
 
 vector<int> WeekPlan::convertDayofWeekListfromString(const string& data)
 {
-    vector<int> dayOfWeekList;
-    // for(size_t i = 0; i < data.size(); ++i){
-    //     const size_t pos = data.find(',', i);
-    //     if(pos == string::npos){
-    //         break;
-    //     }
-
-    //     const string subItem = data.substr(pos - 1, 1);
-    //     dayOfWeekList.push_back(std::stoi(subItem));
-    //     i += (pos + 1);
-    // }
-
-    // const string border{ "[]" };
-    // if(data.size() > border.size()){
-    //     const size_t lastElementPos = data.size() - 2;
-    //     const string subItem = data.substr(lastElementPos, 1);
-    //     dayOfWeekList.push_back(std::stoi(subItem));
-    // }
-    // return dayOfWeekList;
-
     std::regex pattern(R"(\d+)");
     std::sregex_iterator itr(data.begin(), data.end(), pattern);
     std::sregex_iterator end;
 
+    vector<int> weekdays;
     for(; itr != end; ++itr){
-        dayOfWeekList.push_back(std::stoi(itr->str()));
+        weekdays.push_back(std::stoi(itr->str()));
     }
-    return dayOfWeekList;
+    return weekdays;
 }
 
 std::optional<WeekPlan::Record> WeekPlan::getRecord(const string& name)
 {
-    try
-    {
-        /* code */
-        const string projectPath{ "/opt/paceic_ems_server/main" };
-        const string dbPath{ projectPath + "/db" };
-        BOOST_ASSERT(filesystem::is_directory(dbPath));
+try
+{
+    auto XftgDb = base::Database::open("/Xftg.sqlite");
+    std::optional<Record> optValue;
 
-        const string filename{ dbPath + "/Xftg.sqlite" };
-        sqlite::database XftgDb(filename);
-
-        std::optional<Record> optValue;
-
-        // 查询
-        XftgDb << "SELECT "
-                    "DAYPLAN_DURATION_NAME, "
-                    "DAYPLAN_PROTECT_NAME, "
-                    "DAY_WHITE_LIST, "
-                    "VALID_DATE_BEGIN, VALID_DATE_END, "
-                    "PRIORITY, BIND_SYSTEM "
-                    "FROM XFTG_WEEK_PLAN "
-                    "WHERE NAME = ?;"
-                << name
-
-        >> [&](string dayPlanDurationName_, string dayPlanProtectName_,
-                string dayWhiteList_,
-                string validDateBegin_, string validDateEnd_,
-                string priority_, string bindSystem_){
-                    
-                    optValue.emplace(dayPlanDurationName_, dayPlanProtectName_,
-                                        dayWhiteList_,
-                                        validDateBegin_, validDateEnd_,
-                                        priority_, bindSystem_);
-                };
-        return optValue;
-    }
-    catch(const std::exception& e){
-        std::cerr << e.what() << '\n';
-    }
+    // 查询
+    XftgDb << "SELECT "
+                "DAYPLAN_DURATION_NAME, DAYPLAN_PROTECT_NAME, "
+                "DAY_WHITE_LIST, VALID_DATE_BEGIN, VALID_DATE_END, PRIORITY, BIND_SYSTEM "
+                "FROM XFTG_WEEK_PLAN WHERE NAME = ?;"
+            << name
+            >> [&](string dayPlanDurationName_, string dayPlanProtectName_,
+                    string dayWhiteList_,
+                    string validDateBegin_, string validDateEnd_,
+                    string priority_, string bindSystem_){
+                        
+                        optValue.emplace(dayPlanDurationName_, dayPlanProtectName_,
+                                            dayWhiteList_,
+                                            validDateBegin_, validDateEnd_,
+                                            priority_, bindSystem_);
+                    };
+    return optValue;
+}
+catch(const std::exception& e){
+    std::cerr << e.what() << '\n';
+}
     return {};
 }
 
@@ -527,14 +471,7 @@ std::optional<vector<WeekPlan::RecordWithName>> WeekPlan::getAllRecords()
 {
 try
 {
-    /* code */
-    const string projectPath{ "/opt/paceic_ems_server/main" };
-    const string dbPath{ projectPath + "/db" };
-    BOOST_ASSERT(filesystem::is_directory(dbPath));
-
-    const string filename{ dbPath + "/Xftg.sqlite" };
-    sqlite::database XftgDb(filename);
-
+    auto XftgDb = base::Database::open("/Xftg.sqlite");
     vector<RecordWithName> RecordWithNameList;
 
     // 查询

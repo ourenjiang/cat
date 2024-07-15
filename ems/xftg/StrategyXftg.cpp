@@ -21,12 +21,15 @@ using namespace boost;
 using namespace ems;
 using namespace ems::xftg;
 
-StrategyXftg::StrategyXftg(std::shared_ptr<zmq::socket_t> stationDealer)
+StrategyXftg::StrategyXftg(std::shared_ptr<zmq::socket_t> dataDealer, std::shared_ptr<zmq::socket_t> cmdDealer, std::shared_ptr<zmq::socket_t> setDealer)
     : log_(ems::Log4cppWrapper::getLogger(0))
-    , stationDealer_(stationDealer)
+    , dataDealer_(dataDealer)
+    , cmdDealer_(cmdDealer)
+    , setDealer_(setDealer)
 {
-    stationDealer_->set(zmq::sockopt::rcvtimeo, 1000);
+    setDealer_->set(zmq::sockopt::rcvtimeo, 1000);
     
+    loadAutoRun();
     loadWeekPlanInfo();
     loadDayPlanDurationInfo();
     loadDayPlanProtectInfo();
@@ -39,55 +42,39 @@ StrategyXftg::~StrategyXftg()
     }
 }
 
+void StrategyXftg::start()
+{
+    loopThread_ = std::thread([&]{
+    while(true){
+        doWork();
+    }});
+}
+
 void StrategyXftg::doWork()
 {
 try
 {
     zmq::message_t srcIdentity;
-    auto result = stationDealer_->recv(srcIdentity);
-    if(!result.has_value()){
-
-        // 请求站点更新数据
-        stationDealer_->send(zmq::message_t(string("Station")), zmq::send_flags::sndmore);
-        stationDealer_->send(zmq::message_t(string("ReadInfo")), zmq::send_flags::none);
-
-        publish();// 向上发布策略状态
-        return;
-    }
-
-    const string idString(static_cast<char*>(srcIdentity.data()), srcIdentity.size());
-    if(idString == "Station"){// 来自站点的‘采集数据’返回
-        zmq::message_t rcvmsg;
-        (void)stationDealer_->recv(rcvmsg);
-        const string msgString(static_cast<char*>(rcvmsg.data()), rcvmsg.size());
-
-        StationInfo stationInfo;
-        const bool unpackResult = msgpackWrapper::unpack(rcvmsg.data(), rcvmsg.size(), stationInfo);
-        BOOST_ASSERT(unpackResult);
-
-        // 基于最新数据进行控制
-        control(stationInfo);
-    }
-    else if(idString == "PCS0"){// 来自PCS的控制返回,不需要返回
-
-    }
-    else if(idString == "BAU0"){// 来自PCS的控制返回,不需要返回
-        zmq::message_t rcvmsg;
-        (void)stationDealer_->recv(rcvmsg);
-
-        // 解析消息
-        pair<bool, vector<uint8_t>> respondMsg;
-        const bool unpackMsgResult = msgpackWrapper::unpack(rcvmsg.data(), rcvmsg.size(), respondMsg);
-        BOOST_ASSERT(unpackMsgResult);
-        const auto& [returnStatus, returnContent] = respondMsg;
-        if(!returnStatus)
-            throw std::runtime_error("modbus respond failed");
-    }
-    else if(idString == "Interface"){
+    auto result = setDealer_->recv(srcIdentity);// 注意，这里主动向策略发消息的，只能是interface
+    if(result.has_value()){
 
         // 接收用户接口控制，需要返回
         doCommand(srcIdentity);
+        return;
     }
+
+    // 请求站点更新数据
+    StationInfo stationInfo = base::getStationInfo(dataDealer_);// 同步请求/响应
+
+    // 基于最新数据进行控制
+    control(stationInfo);// 同步请求/响应
+
+    // 向上发布策略状态, 只有发送没有接收
+    auto serializedBody = msgpackWrapper::pack(strategyInfo_);
+    dataDealer_->send(zmq::message_t(string("PublishInfo")), zmq::send_flags::sndmore);
+    dataDealer_->send(zmq::message_t(string("Strategy")), zmq::send_flags::sndmore);
+    dataDealer_->send(zmq::message_t(string("0")), zmq::send_flags::sndmore);
+    dataDealer_->send(zmq::message_t(serializedBody.data(), serializedBody.size()), zmq::send_flags::none);
 }
 catch(const std::exception& e)
 {
@@ -97,13 +84,54 @@ catch(const std::exception& e)
 
 void StrategyXftg::control(const StationInfo& stationInfo)
 {
-    // 执行策略计划，并获得控制命令
-    doUpdateInfo(stationInfo.bauMap_.at(0), stationInfo.pcsMap_.at(0));
+try
+{
+    if(!strategyInfo_.autoRun)// 自动运行开关检查
+        return;
+    /////////////////////////////////////////////////////////////////
 
-    // 发出控制命令
-    // stationDealer_->send(zmq::message_t(string("BAU0")), zmq::send_flags::sndmore);// devId
-    // stationDealer_->send(zmq::message_t(string("Strategy0")), zmq::send_flags::sndmore);// return id
-    // stationDealer_->send(createMsg(0xd700, 0), zmq::send_flags::none);
+    const auto& bauMap = stationInfo.bauMap_;
+    const auto& pcsMap = stationInfo.pcsMap_;
+    if(bauMap.find(0) == bauMap.end() || pcsMap.find(0) == pcsMap.end()){
+        return;
+    }
+    const auto& bauInfo = stationInfo.bauMap_.at(0);
+    const auto& pcsInfo = stationInfo.pcsMap_.at(0);
+
+    const auto bauParams =  getBauParams(bauInfo);
+    const auto pcsParams =  getPcsParams(pcsInfo);
+    const auto userParams =  getUserParams();
+
+    // 执行策略计划，并获得控制命令
+    auto frameResult = getRespondCmd(bauParams, pcsParams, userParams);
+    if(frameResult.has_value()){
+        // 请求
+        vector<uint8_t> data = frameResult.value();
+        cmdDealer_->send(zmq::message_t(string("PCS0Cmd")), zmq::send_flags::sndmore);// devId
+        cmdDealer_->send(zmq::message_t(string("Strategy0Cmd")), zmq::send_flags::sndmore);// return id
+        cmdDealer_->send(zmq::message_t(data.data(), data.size()), zmq::send_flags::none);
+
+        zmq::message_t msg;
+        (void)cmdDealer_->recv(msg);
+
+        // 解析消息
+        pair<bool, vector<uint8_t>> respondMsg;
+        const bool unpackMsgResult = msgpackWrapper::unpack(msg.data(), msg.size(), respondMsg);
+        BOOST_ASSERT(unpackMsgResult);
+        const auto& [returnStatus, returnContent] = respondMsg;
+        if(!returnStatus)
+            throw std::runtime_error("modbus respond failed");
+    }
+}
+catch(const std::exception& e)
+{
+    // 控制执行异常时，将整体策略状态切换为'手动';
+    // 情况一：找不到有效的周策略
+    strategyInfo_.autoRun = false;
+    strategyInfo_.activeStrategy = "无";
+
+    std::cerr << e.what() << '\n';
+}
 }
 
 zmq::message_t StrategyXftg::createMsg(const uint16_t regAddress, const uint16_t regData)
@@ -112,38 +140,36 @@ zmq::message_t StrategyXftg::createMsg(const uint16_t regAddress, const uint16_t
     return { reqmsg.data(), reqmsg.size() };
 }
 
-void StrategyXftg::publish()
-{
-    auto serializedBody = msgpackWrapper::pack(strategyInfo_);
-    stationDealer_->send(zmq::message_t(string("Station")), zmq::send_flags::sndmore);
-    stationDealer_->send(zmq::message_t(string("PublishInfo")), zmq::send_flags::sndmore);
-    stationDealer_->send(zmq::message_t(string("Strategy")), zmq::send_flags::sndmore);
-    stationDealer_->send(zmq::message_t(string("0")), zmq::send_flags::sndmore);
-    stationDealer_->send(zmq::message_t(serializedBody.data(), serializedBody.size()), zmq::send_flags::none);
-}
-
 void StrategyXftg::doCommand(zmq::message_t& srcIdentity)
 {
     // type1 : 由 interface接收下发的，需要响应;
     // type2 : 来自PCS的控制响应帧，不需要响应;
     // type3 : 
     zmq::message_t msg;
-    (void)stationDealer_->recv(msg);
+    (void)setDealer_->recv(msg);
     const string msgString(static_cast<char*>(msg.data()), msg.size());
 
     if(msgString == "AutoRun"){
+        // 修改自动运行标志 ?
         loadAutoRun();
     }
-    // 修改自动运行标志 ?
-    // 重新加载削峰填谷-日计划 ?
-    // 重新加载削峰填谷-保护参数 ?
-    // 重新加载削峰填谷-周计划 ?
+    else if(msgString == "WeekPlan"){
+        // 重新加载削峰填谷-周计划 ?
+        loadWeekPlanInfo();
+    }
+    else if(msgString == "DayPlanDuration"){
+        // 重新加载削峰填谷-日计划 ?
+        loadDayPlanDurationInfo();
+    }
+    else if(msgString == "DayPlanProtect"){
+        // 重新加载削峰填谷-保护参数 ?
+        loadDayPlanProtectInfo();
+    }
     
-    pair<bool, vector<uint8_t>> respondMsg{true, {}};
+    pair<bool, string> respondMsg{true, {}};
     auto serializedBody = msgpackWrapper::pack(respondMsg);
-    stationDealer_->send(zmq::message_t(), zmq::send_flags::sndmore);
-    stationDealer_->send(srcIdentity, zmq::send_flags::sndmore);
-    stationDealer_->send(zmq::message_t(serializedBody.data(), serializedBody.size()), zmq::send_flags::none);
+    setDealer_->send(srcIdentity, zmq::send_flags::sndmore);
+    setDealer_->send(zmq::message_t(serializedBody.data(), serializedBody.size()), zmq::send_flags::none);
 }
 
 
@@ -162,8 +188,10 @@ void StrategyXftg::loadAutoRun()
 void StrategyXftg::loadWeekPlanInfo()
 {
     // 从数据库表加载周计划
+    weekPlanInfoMap_.clear();// 清空旧数据
     const auto records = WeekPlan::getAllRecords();
-    BOOST_ASSERT(records.has_value());
+    if(!records.has_value())
+        return;
 
     for(const auto& item : records.value()){
 
@@ -191,30 +219,28 @@ void StrategyXftg::loadDayPlanDurationInfo()
 
         auto& durationInfoList = dayPlanDurationMap_[records.first];
 
-        for(const auto& record : records.second){
+        const vector<DayPlanDuration::Record>& durations = records.second;
+        for(auto& [durationName, 
+            durationBegin, durationEnd, controlType, targetSoc, targetPower] : durations){
 
             DurationInfo info;
-            info.durationName = std::get<0>(record);
-            info.durationBegin = std::get<1>(record);
-            info.durationEnd = std::get<2>(record);
-            info.controlType = std::get<3>(record);
+            info.durationName = durationName;
+            info.durationBegin = durationBegin;
+            info.durationEnd = durationEnd;
+            info.controlType = controlType;
             {
                 std::regex pattern(R"((\d+)%)");// 匹配类似100%中的数值
                 std::smatch matches;
-                const bool searchResult = std::regex_search(std::get<4>(record), matches, pattern);
+                const bool searchResult = std::regex_search(targetSoc, matches, pattern);
                 BOOST_ASSERT(searchResult);
                 info.targetSoc = std::stoi(matches[1].str());
             }
             {
-                // std::regex pattern("[-+]?[0-9]*\\.?[0-9]+([eE][-+]?[0-9]+)?kW");// 匹配类似100%中的数值
-                // std::smatch matches;
-                // const bool searchResult = std::regex_search(std::get<5>(record), matches, pattern);
-                // BOOST_ASSERT(searchResult);
-                // const string testString = matches[1].str();
-
-                string content = std::get<5>(record);
-                content.pop_back();
-                info.targetPower = std::stod(content);
+                std::regex pattern(R"((\d+)kW)");// 匹配类似100kW中的数值
+                std::smatch matches;
+                const bool searchResult = std::regex_search(targetPower, matches, pattern);
+                BOOST_ASSERT(searchResult);
+                info.targetPower = std::stod(matches[1].str());
             }
             durationInfoList.emplace_back(info);
         }
@@ -239,14 +265,6 @@ void StrategyXftg::loadDayPlanProtectInfo()
 
         protectPrarmsMap_.emplace(std::get<0>(item), info);
     }
-}
-
-void StrategyXftg::start()
-{
-    loopThread_ = std::thread([&]{
-    while(true){
-        doWork();
-    }});
 }
 
 vector<uint8_t> StrategyXftg::getFramePowerOff()
@@ -329,150 +347,123 @@ vector<uint8_t> StrategyXftg::getFrameChangeActivePower(const string& status, co
     return requestMessage;
 }
 
-std::optional<vector<uint8_t>> StrategyXftg::getActionWhenCharge(const ExecuteParams& params)
+std::optional<vector<uint8_t>> StrategyXftg::getActionWhenCharge(const BauParams& bauParams, const PcsParams& pcsParams, const UserParams& userParams)
 {
     // 禁止充电
-    if(!params.bauAllowCharge){
+    if(!bauParams.bauAllowCharge){
         // 降低功率
-        double newPower = params.pcsCurrentSettingPower;
+        double newPower = pcsParams.pcsCurrentSettingPower;
         if(newPower > 1.0) newPower -= 1.0;
         else newPower = 0.0;
         return getFrameChangeActivePower("charge", newPower);
     }
 
     // 校验充电保护参数(功率);
-    double userSuggestPower = params.userSuggestPower;
-    if(userSuggestPower > params.allowChargePowerMax){
-        userSuggestPower = params.allowChargePowerMax;
+    double userSuggestPower = userParams.userSuggestPower;
+    if(userSuggestPower > userParams.allowChargePowerMax){
+        userSuggestPower = userParams.allowChargePowerMax;
     }
 
     // 校验充电保护参数(SOC);
-    int userSuggestSoc = params.userSuggestSoc;
-    if(userSuggestSoc > params.allowSocMax){
-        userSuggestSoc = params.allowSocMax;
+    int userSuggestSoc = userParams.userSuggestSoc;
+    if(userSuggestSoc > userParams.allowSocMax){
+        userSuggestSoc = userParams.allowSocMax;
     }
 
     // 电池推荐：降功率 => 降功率：结束
-    if(params.batteryChargeStatus == bau::BatteryStatus::SuggestDown){
-        return verifyChargeWithBatterySuggestPowerDown(params.pcsCurrentSettingPower);
+    if(bauParams.batteryChargeStatus == bau::BatteryStatus::SuggestDown){
+        return verifyChargeWithBatterySuggestPowerDown(pcsParams.pcsCurrentSettingPower);
     }
 
     // 电池推荐：稳定输出
-    if(params.batteryChargeStatus == bau::BatteryStatus::Stable){
+    if(bauParams.batteryChargeStatus == bau::BatteryStatus::Stable){
         
-        return verifyChargeWithBatterySuggestPowerStable(params.userSuggestStatus,
-                                                    userSuggestPower, params.pcsCurrentSettingPower,
-                                                    userSuggestSoc, params.batteryCurrentSoc);
+        return verifyChargeWithBatterySuggestPowerStable(userParams.userSuggestStatus,
+                                                    userSuggestPower, pcsParams.pcsCurrentSettingPower,
+                                                    userSuggestSoc, bauParams.batteryCurrentSoc);
     }
 
     // 电池推荐：提高功率
-    if(params.batteryChargeStatus == bau::BatteryStatus::SuggestUp){
-        return verifyChargeWithBatterySuggestPowerUp(params.userSuggestStatus,
-                                                userSuggestPower, params.pcsCurrentSettingPower,
-                                                userSuggestSoc, params.batteryCurrentSoc);
+    if(bauParams.batteryChargeStatus == bau::BatteryStatus::SuggestUp){
+        return verifyChargeWithBatterySuggestPowerUp(userParams.userSuggestStatus,
+                                                userSuggestPower, pcsParams.pcsCurrentSettingPower,
+                                                userSuggestSoc, bauParams.batteryCurrentSoc);
     }
     return {};
 }
 
-std::optional<vector<uint8_t>> StrategyXftg::getActionWhenDischarge(const ExecuteParams& params)
+std::optional<vector<uint8_t>> StrategyXftg::getActionWhenDischarge(const BauParams& bauParams, const PcsParams& pcsParams, const UserParams& userParams)
 {
     // 禁止放电
-    if(!params.bauAllowDischarge){
+    if(!bauParams.bauAllowDischarge){
         // 降低功率
-        double newPower = params.pcsCurrentSettingPower;
+        double newPower = pcsParams.pcsCurrentSettingPower;
         if(newPower > 1.0) newPower -= 1.0;
         else newPower = 0.0;
         return getFrameChangeActivePower("discharge", newPower);
     }
 
     // 校验放电保护参数(功率);
-    double userSuggestPower = params.userSuggestPower;
-    if(userSuggestPower > params.allowDischargePowerMax){
-        userSuggestPower = params.allowDischargePowerMax;
+    double userSuggestPower = userParams.userSuggestPower;
+    if(userSuggestPower > userParams.allowDischargePowerMax){
+        userSuggestPower = userParams.allowDischargePowerMax;
     }
 
     // 校验放电保护参数(SOC);
-    int userSuggestSoc = params.userSuggestSoc;
-    if(userSuggestSoc < params.allowSocMin){
-        userSuggestSoc = params.allowSocMin;
+    int userSuggestSoc = userParams.userSuggestSoc;
+    if(userSuggestSoc < userParams.allowSocMin){
+        userSuggestSoc = userParams.allowSocMin;
     }
 
     // 电池推荐：降功率 => 降功率：结束
-    if(params.batteryDischargeStatus == bau::BatteryStatus::SuggestDown){
-        return verifyDischargeWithBatterySuggestPowerDown(params.pcsCurrentSettingPower);
+    if(bauParams.batteryDischargeStatus == bau::BatteryStatus::SuggestDown){
+        return verifyDischargeWithBatterySuggestPowerDown(pcsParams.pcsCurrentSettingPower);
     }
 
     // 电池推荐：稳定输出
-    if(params.batteryDischargeStatus == bau::BatteryStatus::Stable){
-        return verifyDischargeWithBatterySuggestPowerStable(params.userSuggestStatus,
-                                                        userSuggestPower, params.pcsCurrentSettingPower,
-                                                        userSuggestSoc, params.batteryCurrentSoc);
+    if(bauParams.batteryDischargeStatus == bau::BatteryStatus::Stable){
+        return verifyDischargeWithBatterySuggestPowerStable(userParams.userSuggestStatus,
+                                                        userSuggestPower, pcsParams.pcsCurrentSettingPower,
+                                                        userSuggestSoc, bauParams.batteryCurrentSoc);
     }
 
     // 电池推荐：提高功率
-    if(params.batteryDischargeStatus == bau::BatteryStatus::SuggestUp){
-        return verifyDischargeWithBatterySuggestPowerUp(params.userSuggestStatus,
-                                                    userSuggestPower, params.pcsCurrentSettingPower,
-                                                    userSuggestSoc, params.batteryCurrentSoc);
+    if(bauParams.batteryDischargeStatus == bau::BatteryStatus::SuggestUp){
+        return verifyDischargeWithBatterySuggestPowerUp(userParams.userSuggestStatus,
+                                                    userSuggestPower, pcsParams.pcsCurrentSettingPower,
+                                                    userSuggestSoc, bauParams.batteryCurrentSoc);
     }
     return {};
 }
 
-std::optional<vector<uint8_t>> StrategyXftg::getActionWhenStandby(const ExecuteParams& params)
+std::optional<vector<uint8_t>> StrategyXftg::getActionWhenStandby(const BauParams& bauParams, const PcsParams& pcsParams, const UserParams& userParams)
 {
-    BOOST_ASSERT(params.pcsCurrentSettingPower == 0.0);
-
     // 用户推荐：充电
-    if(params.userSuggestStatus == "charge"){
+    if(userParams.userSuggestStatus == "charge"){
         // 提高功率
-        double newPower = params.pcsCurrentSettingPower + 1.0;
+        double newPower = pcsParams.pcsCurrentSettingPower + 1.0;
         return getFrameChangeActivePower("charge", newPower);
     }
 
     // 用户推荐：放电
-    if(params.userSuggestStatus == "discharge"){
+    if(userParams.userSuggestStatus == "discharge"){
         // 提高功率
-        double newPower = params.pcsCurrentSettingPower + 1.0;
+        double newPower = pcsParams.pcsCurrentSettingPower + 1.0;
         return getFrameChangeActivePower("discharge", newPower);
     }
 
     // 用户推荐：待机
-    if(params.userSuggestStatus == "standby"){
+    if(userParams.userSuggestStatus == "standby"){
         // 保持待机
         return {};
     }
     return {};
 }
 
-void StrategyXftg::doUpdateInfo(const bau::BauInfo& bauInfo, const pcs::PcsInfo& pcsInfo)
+UserParams StrategyXftg::getUserParams()
 {
-    const auto& bau = bauInfo;
-    const auto& pcs = pcsInfo;
-
-    // 提取策略所依赖的系统实时参数
-    const double batteryCurrentVolt = bau.bauStatusSummary.volt;
-    const double batteryCurrentCur = bau.bauStatusSummary.cur;
-    const int batteryCurrentSoc = bau.bauStatusSummary.soc;
-
-    const double batterySuggestChargeVolt = bau.bauStatusSummary.pcsRequestChargeVolt;
-    const double batterySuggestChargeCur = bau.bauStatusSummary.pcsRequestChargeCur;
-    const double batterySuggestDischargeVolt = bau.bauStatusSummary.pcsRequestDischargeVolt;
-    const double batterySuggestDischargeCur = bau.bauStatusSummary.pcsRequestDischargeCur;
-    const auto batteryChargeStatus = bauStatus_.getChargeStatus(batteryCurrentVolt, batteryCurrentCur,
-                                                                batterySuggestChargeVolt, batterySuggestChargeCur);
-    const auto batteryDischargeStatus = bauStatus_.getDischargeStatus(batteryCurrentVolt, batteryCurrentCur,
-                                                                            batterySuggestDischargeVolt, batterySuggestDischargeCur);
-
-    const bool bauAllowRunning = bau.allowRunning;
-    const bool bauAllowCharge = bau.allowCharge;
-    const bool bauAllowDischarge = bau.allowDischarge;
-
-    const double pcsCurrentSettingPower = pcs.frame_0474_04D0_summary.activePowerSetting;
-    const double pcsCurrentOutputPower = pcs.frame_0474_04D0_summary.activePowerSetting;
-    const pcs::RunStatus pcsCurrentStatus = pcs.runStatus;
-
     // 提取策略所依赖的用户计划参数
-    const auto& [durationInfo, protectParams] = getTarget();
+    const auto& [durationInfo, protectParams] = getPlan();
     const string userSuggestStatus = durationInfo.controlType;
     const double userSuggestPower = durationInfo.targetPower;
     const int userSuggestSoc = durationInfo.targetSoc;
@@ -481,50 +472,75 @@ void StrategyXftg::doUpdateInfo(const bau::BauInfo& bauInfo, const pcs::PcsInfo&
     const int allowSocMax = protectParams.socMax;
     const int allowSocMin = protectParams.socMin;
 
-    xftg::ExecuteParams params{bauAllowRunning, bauAllowCharge, bauAllowDischarge,
-                                batteryCurrentVolt, batteryCurrentCur, batteryCurrentSoc,
-                                batteryChargeStatus, batteryDischargeStatus,
-                                pcsCurrentSettingPower, pcsCurrentOutputPower, pcsCurrentStatus,
-                                userSuggestStatus, userSuggestPower, userSuggestSoc,
-                                allowChargePowerMax, allowDischargePowerMax, allowSocMax, allowSocMin };
-    ///////////////////////////////////////////////////////////////////////////////////////////
-
-    auto frameResult = doWork(params);
-    if(frameResult.has_value()){
-        // 请求
-        vector<uint8_t> data = frameResult.value();
-        stationDealer_->send(zmq::message_t(), zmq::send_flags::sndmore);// Topic
-        stationDealer_->send(zmq::message_t(string("PCS0")), zmq::send_flags::sndmore);// devId
-        stationDealer_->send(zmq::message_t(string("Strategy0")), zmq::send_flags::sndmore);// return id
-        stationDealer_->send(zmq::message_t(data.data(), data.size()), zmq::send_flags::none);
-    }
+    const UserParams params{
+        userSuggestStatus, userSuggestPower, userSuggestSoc,
+        allowChargePowerMax, allowDischargePowerMax, allowSocMax, allowSocMin
+    };
+    return params;
 }
 
-std::optional<vector<uint8_t>> StrategyXftg::doWork(const ExecuteParams& params)
+PcsParams StrategyXftg::getPcsParams(const pcs::PcsInfo& pcsInfo)
 {
-    if(!strategyInfo_.autoRun)// 自动运行开关检查
-        return {};
-    /////////////////////////////////////////////////////////////////
+    const double pcsCurrentSettingPower = pcsInfo.frame_0474_04D0_summary.activePowerSetting;
+    const double pcsCurrentOutputPower = pcsInfo.frame_0474_04D0_summary.activePowerSetting;
+    const pcs::RunStatus pcsCurrentStatus = pcsInfo.runStatus;
 
+    const PcsParams params{
+        pcsCurrentSettingPower, pcsCurrentOutputPower, pcsCurrentStatus
+    };
+    return params;
+}
+
+BauParams StrategyXftg::getBauParams(const bau::BauInfo& bauInfo)
+{
+    /* 实时状态： 可运行、可充电、可放电 */
+    const bool bauAllowRunning = bauInfo.allowRunning;
+    const bool bauAllowCharge = bauInfo.allowCharge;
+    const bool bauAllowDischarge = bauInfo.allowDischarge;
+
+    /* 实时电压、电流、SOC */
+    const double batteryCurrentVolt = bauInfo.bauStatusSummary.volt;
+    const double batteryCurrentCur = bauInfo.bauStatusSummary.cur;
+    const int batteryCurrentSoc = bauInfo.bauStatusSummary.soc;
+
+    /* 根据电压/电流 的推荐值与实际值 作比较，得到电流的推荐动作：稳定功率、提升功率或降低功率 */
+    const double batterySuggestChargeVolt = bauInfo.bauStatusSummary.pcsRequestChargeVolt;
+    const double batterySuggestChargeCur = bauInfo.bauStatusSummary.pcsRequestChargeCur;
+    const double batterySuggestDischargeVolt = bauInfo.bauStatusSummary.pcsRequestDischargeVolt;
+    const double batterySuggestDischargeCur = bauInfo.bauStatusSummary.pcsRequestDischargeCur;
+    const auto batteryChargeStatus = bauStatus_.getChargeStatus(batteryCurrentVolt, batteryCurrentCur,
+                                                                batterySuggestChargeVolt, batterySuggestChargeCur);
+    const auto batteryDischargeStatus = bauStatus_.getDischargeStatus(batteryCurrentVolt, batteryCurrentCur,
+                                                                            batterySuggestDischargeVolt, batterySuggestDischargeCur);
+    const BauParams params{
+        bauAllowRunning, bauAllowCharge, bauAllowDischarge,
+        batteryCurrentVolt, batteryCurrentCur, batteryCurrentSoc,
+        batteryChargeStatus, batteryDischargeStatus
+    };
+    return params;
+}
+
+std::optional<vector<uint8_t>> StrategyXftg::getRespondCmd(const BauParams& bauParams, const PcsParams& pcsParams, const UserParams& userParams)
+{
     // 告警、故障位检查
-    if(!params.bauAllowRunning){
-        if(params.pcsCurrentStatus.powerTotal)// 告警、故障产生，需要关机
+    if(!bauParams.bauAllowRunning){
+        if(pcsParams.pcsCurrentStatus.powerTotal)// 告警、故障产生，需要关机
             return getFramePowerOff();
         return {};// 已经关机了，直接退出。
     }
-    if(!params.pcsCurrentStatus.powerTotal)
+    if(!pcsParams.pcsCurrentStatus.powerTotal)
         return getFramePowerOn();// 本轮先开机，下轮再执行正常工作
     /////////////////////////////////////////////////////////////////
 
     // 当前充电
-    if(params.pcsCurrentStatus.gridOnCharge)
-        return getActionWhenCharge(params);
+    if(pcsParams.pcsCurrentStatus.gridOnCharge)
+        return getActionWhenCharge(bauParams, pcsParams, userParams);
     // 当前放电
-    if(params.pcsCurrentStatus.gridOnDischarge)
-        return getActionWhenDischarge(params);
+    if(pcsParams.pcsCurrentStatus.gridOnDischarge)
+        return getActionWhenDischarge(bauParams, pcsParams, userParams);
     // 当前待机
-    if(params.pcsCurrentStatus.standby)
-        return getActionWhenStandby(params);
+    if(pcsParams.pcsCurrentStatus.standby)
+        return getActionWhenStandby(bauParams, pcsParams, userParams);
     return {};
 }
 
@@ -720,7 +736,7 @@ vector<uint8_t> StrategyXftg::verifyDischargeWithBatterySuggestPowerUp(const str
     return {};
 }
 
-std::tuple<DurationInfo, ProtectParams> StrategyXftg::getTarget()
+tuple<DurationInfo, ProtectParams> StrategyXftg::getPlan()
 {
     // 获取周计划
     const auto [weekPlanName, weekPlan] = getWeekPlan();
@@ -733,10 +749,10 @@ std::tuple<DurationInfo, ProtectParams> StrategyXftg::getTarget()
     // 根据当前系统时间，匹配'日计划'中的当前生效时段，并获取动作类型和执行功率
     const DurationInfo dayPlanDuration = getCurrentDurationInDayPlan(dayPlanDurationName);
     const ProtectParams protectParams = getCurrentProtectParamsInWeekPlan(dayPlanProtectName);
-    return { dayPlanDuration, protectParams };
+    return make_tuple(dayPlanDuration, protectParams);
 }
 
-std::pair<string, WeekPlanInfo> StrategyXftg::getWeekPlan()
+pair<string, WeekPlanInfo> StrategyXftg::getWeekPlan()
 {
     // 获取'当前日期'(%Y-%m-%d)，用于匹配生效的'周计划'
     using Clock = std::chrono::system_clock;
@@ -769,7 +785,8 @@ std::pair<string, WeekPlanInfo> StrategyXftg::getWeekPlan()
             }
         }
     }
-    BOOST_ASSERT(!validList.empty());
+    if(validList.empty())
+        throw std::runtime_error("未找到有效的周计划");
 
     // 获取优先级最高的'周计划'
     auto maxPriorityItr = std::max_element(validList.begin(), validList.end(),
@@ -805,7 +822,8 @@ DurationInfo StrategyXftg::getCurrentDurationInDayPlan(const string& name)
                         return ele.durationBegin <= currentTimeString
                                 && ele.durationEnd > currentTimeString;
                     });
-    BOOST_ASSERT(findResult != dayPlanDuration.end());
+    if(findResult == dayPlanDuration.end())
+        throw std::runtime_error("未找到有效的执行时段");
     return *findResult;
 }
 
@@ -813,33 +831,3 @@ ProtectParams StrategyXftg::getCurrentProtectParamsInWeekPlan(const string& name
 {
     return protectPrarmsMap_[name];
 }
-
-// double StrategyXftg::getAdjustedPowerForSmoothOutput(const double srcPower, const double currentPower)
-// {
-//     const double diffPower = srcPower - currentPower;
-//     if(diffPower == 0){
-//         // log_.debug("计划功率与当前设置功率保持一致");
-//         return srcPower;
-//     }
-
-//     const double largeStep = 5.0;
-//     const double smallOStep = 1.0;
-//     if(abs(diffPower) > 20){
-//         // log_.debug("选择较大的功率调节步长");
-//         if(diffPower > 0){
-//             // log_.debug("叠加正向步长");
-//             return currentPower + largeStep;
-//         }
-//         // log_.debug("叠加反向步长");
-//         return currentPower + largeStep * (-1);
-//     }
-
-//     // log_.debug("选择较小的功率调节步长");
-//     if(diffPower > 0)
-//     {
-//         // log_.debug("叠加正向步长");
-//         return currentPower + smallOStep;
-//     }
-//     // log_.debug("叠加反向步长");
-//     return currentPower + smallOStep * (-1);
-// }

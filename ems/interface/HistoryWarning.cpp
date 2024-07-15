@@ -6,10 +6,12 @@
 #include "utils/MsgpackWrapper_src.hpp"
 #include "utils/Miscellaneous.h"
 #include "utils/jsonWrapper.h"
+#include "ems/base/Database.h"
 
 using namespace ems;
 
-void HistoryWarning::requestCallbackGet(const httplib::Request &req, httplib::Response &res, shared_ptr<zmq::socket_t> stationDealer)
+void HistoryWarning::requestCallbackGet(const httplib::Request &req, httplib::Response &res,
+                                    shared_ptr<zmq::socket_t> dataDealer, shared_ptr<zmq::socket_t> cmdDealer)
 {
 try
 {
@@ -42,7 +44,6 @@ try
     
     // 成功响应
     Json::Value repJson;
-    // repJson["data"] = json_wrapper::deserialize(respondContent);
     repJson["data"] = root;
     repJson["errcode"] = 0;
     repJson["errmsg"] = "success";
@@ -57,7 +58,8 @@ catch(const std::exception& e){
 }
 }
 
-void HistoryWarning::requestCallbackGetPageInfo(const httplib::Request &req, httplib::Response &res, shared_ptr<zmq::socket_t> stationDealer)
+void HistoryWarning::requestCallbackGetPageInfo(const httplib::Request &req, httplib::Response &res,
+                                    shared_ptr<zmq::socket_t> dataDealer, shared_ptr<zmq::socket_t> cmdDealer)
 {
 try
 {
@@ -98,28 +100,21 @@ catch(const std::exception& e){
 
 void HistoryWarning::createTable()
 {
-    try
-    {
-        /* code */
-        const string projectPath{ "/opt/paceic_ems_server/main" };
-        const string dbPath{ projectPath + "/db" };
-        BOOST_ASSERT(filesystem::is_directory(dbPath));
-
-        const string filename{ dbPath + "/Warning.sqlite" };
-        sqlite::database WarningDb(filename);
-
-        WarningDb << "CREATE TABLE IF NOT EXISTS WARN("
-                        "ID INTEGER PRIMARY KEY AUTOINCREMENT, "
-                        "CONTENT TEXT, "
-                        "LEVEL TEXT, "
-                        "DEVICE_NAME TEXT, "
-                        "CREATE_TIME TEXT, "
-                        "ACTION TEXT, "
-                        "PROCESSED TEXT);";
-    }
-    catch(const std::exception& e){
-        std::cerr << e.what() << '\n';
-    }
+try
+{
+    auto WarnDb = base::Database::open("/Warning.sqlite");
+    WarnDb << "CREATE TABLE IF NOT EXISTS WARN("
+                    "ID INTEGER PRIMARY KEY AUTOINCREMENT, "
+                    "CONTENT TEXT, "
+                    "LEVEL TEXT, "
+                    "DEVICE_NAME TEXT, "
+                    "CREATE_TIME TEXT, "
+                    "ACTION TEXT, "
+                    "PROCESSED TEXT);";
+}
+catch(const std::exception& e){
+    std::cerr << e.what() << '\n';
+}
 }
 
 BauStatusProtectStatus::BauStatusProtectStatus()
@@ -155,15 +150,6 @@ vector<HistoryWarning::Record> HistoryWarning::getRecord(const string pageSize, 
                                                         const string beginTime, const string endTime,
                                                         const string action, const string processed) const
 {
-    const string projectPath{ "/opt/paceic_ems_server/main" };
-    const string dbPath{ projectPath + "/db" };
-    BOOST_ASSERT(filesystem::is_directory(dbPath));
-
-    const string filename{ dbPath + "/Warning.sqlite" };
-    sqlite::database WarnDb(filename);
-
-    vector<Record> records;
-
     const string patternLevel = level + "%";
     const string patternDeviceName = deviceName + "%";
     const string patternBeginTime = beginTime.empty() ? "1900-01-01" : beginTime;
@@ -173,6 +159,9 @@ vector<HistoryWarning::Record> HistoryWarning::getRecord(const string pageSize, 
 
     const string patternLimit = pageSize;
     const string patternOffset = to_string(std::stoi(pageSize) * (std::stoi(pageIndex) + 1));
+
+    vector<Record> records;
+    auto WarnDb = base::Database::open("/Warning.sqlite");
 
     // 查询
     WarnDb << "SELECT "
@@ -206,15 +195,6 @@ tuple<string, string, string> HistoryWarning::getRecordPageInfo(const string pag
                                                         const string beginTime, const string endTime,
                                                         const string action, const string processed) const
 {
-    const string projectPath{ "/opt/paceic_ems_server/main" };
-    const string dbPath{ projectPath + "/db" };
-    BOOST_ASSERT(filesystem::is_directory(dbPath));
-
-    const string filename{ dbPath + "/Warning.sqlite" };
-    sqlite::database WarnDb(filename);
-
-    vector<Record> records;
-
     const string patternLevel = level + "%";
     const string patternDeviceName = deviceName + "%";
     const string patternBeginTime = beginTime.empty() ? "1900-01-01" : beginTime;
@@ -223,6 +203,7 @@ tuple<string, string, string> HistoryWarning::getRecordPageInfo(const string pag
     const string patternProcessed = processed + "%";
 
     // 查询
+    auto WarnDb = base::Database::open("/Warning.sqlite");
     int recordCounts;
     WarnDb << "SELECT COUNT(*) "
                 "FROM WARN WHERE LEVEL LIKE ?"

@@ -12,7 +12,8 @@ class PublicInfo
 {
 public:
     PublicInfo();
-    void requestCallback(const httplib::Request &req, httplib::Response &res, shared_ptr<zmq::socket_t> stationDealer);
+    void requestCallback(const httplib::Request &req, httplib::Response &res,
+                        shared_ptr<zmq::socket_t> dataDealer, shared_ptr<zmq::socket_t> cmdDealer);
 private:
     log4cpp::Category& log_;
 };

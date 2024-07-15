@@ -17,9 +17,9 @@ public:
 
     static optional<string> getRecord(const string& branchIndex);
     static void requestCallbackGet(const httplib::Request &req, httplib::Response &res,
-                                    shared_ptr<zmq::socket_t> stationDealer);
+                                    shared_ptr<zmq::socket_t> dataDealer, shared_ptr<zmq::socket_t> cmdDealer);
     static void requestCallbackPut(const httplib::Request &req, httplib::Response &res,
-                                    shared_ptr<zmq::socket_t> stationDealer);
+                                    shared_ptr<zmq::socket_t> dataDealer, shared_ptr<zmq::socket_t> cmdDealer);
 
 };
 

@@ -12,7 +12,8 @@ class StorageEnergySystem
 {
 public:
     StorageEnergySystem();
-    void requestCallback(const httplib::Request &req, httplib::Response &res, shared_ptr<zmq::socket_t> stationDealer);
+    void requestCallback(const httplib::Request &req, httplib::Response &res,
+                        shared_ptr<zmq::socket_t> dataDealer, shared_ptr<zmq::socket_t> cmdDealer);
 private:
     static string convertCellAddrFormat(const uint16_t);
 

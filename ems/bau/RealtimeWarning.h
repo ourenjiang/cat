@@ -14,8 +14,10 @@ class RealtimeWarning
 {
 public:
     RealtimeWarning();
-    void requestCallbackBau(const httplib::Request &req, httplib::Response &res, shared_ptr<zmq::socket_t> stationDealer);
-    void requestCallbackBcu(const httplib::Request &req, httplib::Response &res, shared_ptr<zmq::socket_t> stationDealer);
+    void requestCallbackBau(const httplib::Request &req, httplib::Response &res,
+                        shared_ptr<zmq::socket_t> dataDealer, shared_ptr<zmq::socket_t> cmdDealer);
+    void requestCallbackBcu(const httplib::Request &req, httplib::Response &res,
+                        shared_ptr<zmq::socket_t> dataDealer, shared_ptr<zmq::socket_t> cmdDealer);
 private:
 };
 

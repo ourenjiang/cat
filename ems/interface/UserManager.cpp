@@ -1,5 +1,5 @@
 #include "UserManager.h"
-#include "sqlite_modern_cpp.h"
+// #include "sqlite_modern_cpp.h"
 #include "utils/Miscellaneous.h"
 #include "ems/interface/OperationRecord.h"
 #include "utils/AuthException.h"
@@ -8,7 +8,7 @@
 #include "ems/base/UserManager.h"
 #include "ems/base/OperationRecord.h"
 #include "utils/jsonWrapper.h"
-#include <filesystem>
+#include "ems/base/Database.h"
 
 using namespace ems;
 
@@ -17,14 +17,9 @@ UserManager::UserManager()
 {
 }
 
-void UserManager::createDefaultRecord()
+void UserManager::createTable()
 {
-    const string projectPath{ "/opt/paceic_ems_server/main" };
-    const string dbPath{ projectPath + "/db" };
-    BOOST_ASSERT(filesystem::is_directory(dbPath));
-
-    const string filename{ dbPath + "/Users.sqlite" };
-    sqlite::database UserDb(filename);
+    auto UserDb = base::Database::open("/Users.sqlite");
 
     // 创建表
     // 用户名 - 密码 - 用户等级 - 电话 - 邮箱
@@ -34,39 +29,29 @@ void UserManager::createDefaultRecord()
         "GRADE TEXT,"
         "PHONE TEXT,"
         "EMAIL TEXT);";
-
-    // 插入默认记录
-    // 0 - 超级管理员   1 - 管理员   2 - 普通用户
-    {
-        int recordCount{ 0 };
-        UserDb << "SELECT COUNT(*) FROM USER WHERE NAME = ?;"
-            << "root" >> recordCount;
-        if(recordCount == 0){
-            UserDb << "INSERT INTO USER (NAME, PASSWORD, GRADE, PHONE, EMAIL) VALUES (?, ?, ?, ?, ?);"
-                << "root"  << "123" << "0" << "18513627947" << "ourenjiang@163.com";
-        }
-    }
-    {
-        int recordCount{ 0 };
-        UserDb << "SELECT COUNT(*) FROM USER WHERE NAME = ?;"
-            << "admin" >> recordCount;
-        if(recordCount == 0){
-            UserDb << "INSERT INTO USER (NAME, PASSWORD, GRADE, PHONE, EMAIL) VALUES (?, ?, ?, ?, ?);"
-                << "admin" << "456" << "1" << "15070165514" << "rejia@163.com";
-        }
-    }
-    {
-        int recordCount{ 0 };
-        UserDb << "SELECT COUNT(*) FROM USER WHERE NAME = ?;"
-            << "test" >> recordCount;
-        if(recordCount == 0){
-            UserDb << "INSERT INTO USER (NAME, PASSWORD, GRADE, PHONE, EMAIL) VALUES (?, ?, ?, ?, ?);"
-                << "test"  << "789" << "2" << "15070165514" << "1527474379@163.com";
-        }
-    }
 }
 
-void UserManager::getCallback(const httplib::Request &req, httplib::Response &res, shared_ptr<zmq::socket_t> stationDealer)
+void UserManager::insertIntoDefaultRecord()
+{
+    auto UserDb = base::Database::open("/Users.sqlite");
+
+    // 如果存在旧记录，则不添加新的默认记录
+    int recordCount{0};
+    UserDb << "SELECT COUNT(*) FROM USER;" >> recordCount;
+    if(recordCount > 0) return;
+    
+    // 插入默认记录
+    // 0 - 超级管理员   1 - 管理员   2 - 普通用户
+    UserDb << "INSERT INTO USER (NAME, PASSWORD, GRADE, PHONE, EMAIL) VALUES (?, ?, ?, ?, ?);"
+        << "root"  << "123" << "0" << "18513627947" << "ourenjiang@163.com";
+    UserDb << "INSERT INTO USER (NAME, PASSWORD, GRADE, PHONE, EMAIL) VALUES (?, ?, ?, ?, ?);"
+        << "admin" << "456" << "1" << "15070165514" << "rejia@163.com";
+    UserDb << "INSERT INTO USER (NAME, PASSWORD, GRADE, PHONE, EMAIL) VALUES (?, ?, ?, ?, ?);"
+        << "test"  << "789" << "2" << "15070165514" << "1527474379@163.com";
+}
+
+void UserManager::getCallback(const httplib::Request &req, httplib::Response &res,
+    shared_ptr<zmq::socket_t> dataDealer, shared_ptr<zmq::socket_t> cmdDealer)
 {
 try
 {
@@ -75,12 +60,7 @@ try
     const string username = reqbody["username"].asString();
 
     // 打开数据库
-    const string projectPath{ "/opt/paceic_ems_server/main" };
-    const string dbPath{ projectPath + "/db" };
-    BOOST_ASSERT(filesystem::is_directory(dbPath));
-
-    const string filename{ dbPath + "/Users.sqlite" };
-    sqlite::database UserDb(filename);
+    auto UserDb = base::Database::open("/Users.sqlite");
 
     // 查询记录
     optional<tuple<string, string, string>> record;
@@ -121,17 +101,13 @@ catch(const std::exception& e){
 }
 }
 
-void UserManager::getNameListCallback(const httplib::Request &req, httplib::Response &res, shared_ptr<zmq::socket_t> stationDealer)
+void UserManager::getNameListCallback(const httplib::Request &req, httplib::Response &res,
+    shared_ptr<zmq::socket_t> dataDealer, shared_ptr<zmq::socket_t> cmdDealer)
 {
 try
 {
     // 打开数据库
-    const string projectPath{ "/opt/paceic_ems_server/main" };
-    const string dbPath{ projectPath + "/db" };
-    BOOST_ASSERT(filesystem::is_directory(dbPath));
-
-    const string filename{ dbPath + "/Users.sqlite" };
-    sqlite::database UserDb(filename);
+    auto UserDb = base::Database::open("/Users.sqlite");
 
     Json::Value namelist(Json::arrayValue);
     UserDb << "SELECT NAME FROM USER;"
@@ -153,7 +129,8 @@ catch(const std::exception& e){
 }
 }
 
-void UserManager::getAllCallback(const httplib::Request &req, httplib::Response &res, shared_ptr<zmq::socket_t> stationDealer)
+void UserManager::getAllCallback(const httplib::Request &req, httplib::Response &res,
+    shared_ptr<zmq::socket_t> dataDealer, shared_ptr<zmq::socket_t> cmdDealer)
 {
 try
 {
@@ -171,12 +148,7 @@ try
         throw std::runtime_error("auth failed");
 
     // 打开数据库
-    const string projectPath{ "/opt/paceic_ems_server/main" };
-    const string dbPath{ projectPath + "/db" };
-    BOOST_ASSERT(filesystem::is_directory(dbPath));
-
-    const string filename{ dbPath + "/Users.sqlite" };
-    sqlite::database UserDb(filename);
+    auto UserDb = base::Database::open("/Users.sqlite");
 
     // 查询用户级别
     optional<string> grade;
@@ -217,7 +189,8 @@ catch(const std::exception& e){
 }
 }
 
-void UserManager::postCallback(const httplib::Request &req, httplib::Response &res, shared_ptr<zmq::socket_t> stationDealer)
+void UserManager::postCallback(const httplib::Request &req, httplib::Response &res,
+    shared_ptr<zmq::socket_t> dataDealer, shared_ptr<zmq::socket_t> cmdDealer)
 {
 try
 {
@@ -233,12 +206,7 @@ try
     const string passwordAuth = auth["password"].asString();
 
     // 打开数据库
-    const string projectPath{ "/opt/paceic_ems_server/main" };
-    const string dbPath{ projectPath + "/db" };
-    BOOST_ASSERT(filesystem::is_directory(dbPath));
-
-    const string filename{ dbPath + "/Users.sqlite" };
-    sqlite::database UserDb(filename);
+    auto UserDb = base::Database::open("/Users.sqlite");
     
     /* 鉴权 */
     optional<int> authGrade;
@@ -300,18 +268,14 @@ catch(const std::exception& e){
 }
 }
 
-void UserManager::putCallback(const httplib::Request &req, httplib::Response &res, shared_ptr<zmq::socket_t> stationDealer)
+void UserManager::putCallback(const httplib::Request &req, httplib::Response &res,
+    shared_ptr<zmq::socket_t> dataDealer, shared_ptr<zmq::socket_t> cmdDealer)
 {
 try
 {
     const auto reqbody = json_wrapper::deserialize(req.body);
 
-    const string projectPath{ "/opt/paceic_ems_server/main" };
-    const string dbPath{ projectPath + "/db" };
-    BOOST_ASSERT(filesystem::is_directory(dbPath));
-
-    const string filename{ dbPath + "/Users.sqlite" };
-    sqlite::database UserDb(filename);
+    auto UserDb = base::Database::open("/Users.sqlite");
 
     /* 解析鉴权信息 */
     if(!reqbody.isMember("auth"))
@@ -385,7 +349,8 @@ catch(const std::exception& e){
 }
 }
 
-void UserManager::deleteCallback(const httplib::Request &req, httplib::Response &res, shared_ptr<zmq::socket_t> stationDealer)
+void UserManager::deleteCallback(const httplib::Request &req, httplib::Response &res,
+    shared_ptr<zmq::socket_t> dataDealer, shared_ptr<zmq::socket_t> cmdDealer)
 {
 try
 {

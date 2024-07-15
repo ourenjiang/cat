@@ -8,31 +8,31 @@
 using namespace std;
 using namespace ems;
 
-Processor::Processor(std::shared_ptr<zmq::socket_t> stationDealer)
-    : stationDealer_(stationDealer)
+Processor::Processor(std::shared_ptr<zmq::socket_t> dataDealer)
+    : timer_(1000)
+    , dataDealer_(dataDealer)
 {
-    stationDealer_->set(zmq::sockopt::rcvtimeo, 1000);
+    timer_.setTimeoutCallback(std::bind(&Processor::doWork, this));
+    // dataDealer_->set(zmq::sockopt::rcvtimeo, 1000);
 }
 
 Processor::~Processor()
 {
-    if(loopThread_.joinable()) loopThread_.join();
+    // if(loopThread_.joinable()) loopThread_.join();
 }
 
 void Processor::start()
 {
-    loopThread_ = std::thread([&]{
-    while(true){
-        doWork();
-    }});
+    // loopThread_ = std::thread([&]{
+    // while(true){
+    //     doWork();
+    // }});
+    timer_.start();
 }
 
 void Processor::doWork()
 {
-    zmq::message_t msg;
-    (void)stationDealer_->recv(msg);
-
-    auto stationInfo = base::getStationInfo(stationDealer_);
+    auto stationInfo = base::getStationInfo(dataDealer_);
 
     // 生成历史告警记录
     handleHistoryWarning(stationInfoBefore_, stationInfo);

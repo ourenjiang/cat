@@ -13,7 +13,8 @@ class RealtimeWarning
 {
 public:
     RealtimeWarning();
-    void requestCallbackGetWarningDeviceTree(const Request &req, Response &res, shared_ptr<zmq::socket_t> stationDealer);
+    void requestCallbackGetWarningDeviceTree(const Request &req, Response &res,
+                                            shared_ptr<zmq::socket_t> dataDealer, shared_ptr<zmq::socket_t> cmdDealer);
 private:
 };
 

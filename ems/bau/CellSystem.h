@@ -15,7 +15,7 @@ class CellSystem
 {
 public:
     void requestCallback(const httplib::Request &req, httplib::Response &res,
-                        shared_ptr<zmq::socket_t> stationDealer);
+                        shared_ptr<zmq::socket_t> dataDealer, shared_ptr<zmq::socket_t> cmdDealer);
 private:
     static Json::Value get_statistic(const CellvoltSummary&, const CelltemSummary&);//统计数据
     static Json::Value get_cellvolt(const CellvoltSummary&);//单体电压

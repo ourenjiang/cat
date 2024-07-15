@@ -45,16 +45,15 @@ using namespace std::placeholders;
 class Interface
 {
 public:
-    Interface();
+    Interface(shared_ptr<HttpServer> httpServer, shared_ptr<zmq::socket_t> dataDealer, shared_ptr<zmq::socket_t> cmdDealer);
     ~Interface();
-    void setDealerForStation(shared_ptr<zmq::socket_t> dealer);
-    void setHttpServer(shared_ptr<HttpServer> httpServer){ httpServer_ = httpServer; }
     void start();
 private:
     void doRegister();
 
-    shared_ptr<zmq::socket_t> dealerForStation_;
     shared_ptr<HttpServer> httpServer_;
+    shared_ptr<zmq::socket_t> dataDealer_;
+    shared_ptr<zmq::socket_t> cmdDealer_;
 
     // bau::HeapSystem heapSystem_;
     bau::CellSystem cellSystem_;

@@ -10,13 +10,85 @@ using namespace ems;
 
 Station::Station()
 {
-    zmqRouter_ = make_shared<zmq::socket_t>(zeromq::contextSingleton(), zmq::socket_type::router);
-    zmqRouter_->bind("tcp://*:9005");
+    dataRouter_ = make_shared<zmq::socket_t>(zeromq::contextSingleton(), zmq::socket_type::router);
+    dataRouter_->bind("tcp://*:9005");
+
+    cmdRouter_ = make_shared<zmq::socket_t>(zeromq::contextSingleton(), zmq::socket_type::router);
+    cmdRouter_->bind("tcp://*:9006");
 }
 
 Station::~Station()
 {
-    if(loopThread_.joinable()) loopThread_.join();
+    if(dataThread_.joinable()) dataThread_.join();
+    if(cmdThread_.joinable()) cmdThread_.join();
+}
+
+void Station::start()
+{
+    dataThread_ = std::thread([&]{
+    while(true){
+        doData();
+    }});
+
+    cmdThread_ = std::thread([&]{
+    while(true){
+        doCommand();
+    }});
+}
+
+void Station::doData()
+{
+try
+{
+    // 接收ID
+    zmq::message_t identity;
+    auto result = dataRouter_->recv(identity);
+    ////////////////////////////////////////////////////////
+
+    // 接收一级主题
+    zmq::message_t topic;
+    (void)dataRouter_->recv(topic);
+    const string topicString(static_cast<char*>(topic.data()), topic.size());
+    if(topicString == "PublishInfo"){
+        doPublishInfo();
+    }
+    else if(topicString == "ReadInfo"){
+        doReadInfo(identity);
+    }
+}
+catch(const std::exception& e)
+{
+    std::cerr << e.what() << '\n';
+}
+}
+
+void Station::doCommand()
+{
+try
+{
+    // 接收ID
+    zmq::message_t identity;
+    auto result = cmdRouter_->recv(identity);
+    ////////////////////////////////////////////////////////
+
+    /**
+     * 注意，这里转发消息时，需要剥离消息源的路由地址，
+     * 执行转发的消息是从第2帧开始，且第2帧是由消息源指定的定向路由地址;
+    */
+
+    while(true){
+        zmq::message_t msg;
+        (void)cmdRouter_->recv(msg);
+        const string msgstr(static_cast<char*>(msg.data()), static_cast<char*>(msg.data()) + msg.size());
+        const int isRcvmore = cmdRouter_->get(zmq::sockopt::rcvmore);
+        cmdRouter_->send(msg, isRcvmore ? zmq::send_flags::sndmore : zmq::send_flags::none);
+        if(!isRcvmore) break;
+    }
+}
+catch(const std::exception& e)
+{
+    std::cerr << e.what() << '\n';
+}
 }
 
 void Station::doPublishInfo()
@@ -24,9 +96,9 @@ void Station::doPublishInfo()
     zmq::message_t devName; // 设备名称
     zmq::message_t devIndex;// 设备序号
     zmq::message_t body;    // 正文
-    (void)zmqRouter_->recv(devName);
-    (void)zmqRouter_->recv(devIndex);
-    (void)zmqRouter_->recv(body);
+    (void)dataRouter_->recv(devName);
+    (void)dataRouter_->recv(devIndex);
+    (void)dataRouter_->recv(body);
 
     const string nameString(static_cast<char*>(devName.data()), devName.size());
     const string indexString(static_cast<char*>(devIndex.data()), devIndex.size());
@@ -62,59 +134,9 @@ void Station::doPublishInfo()
 
 void Station::doReadInfo(zmq::message_t& identity)
 {
+    const string idString(static_cast<char*>(identity.data()), identity.size());
     auto serializedBody = msgpackWrapper::pack(stationInfo_);
     zmq::message_t reqmsg(serializedBody.data(), serializedBody.size());
-    zmqRouter_->send(identity, zmq::send_flags::sndmore);
-    zmqRouter_->send(zmq::message_t(string("Station")), zmq::send_flags::sndmore);
-    zmqRouter_->send(reqmsg, zmq::send_flags::none);
-}
-
-void Station::doWork()
-{
-try
-{
-    // 接收ID
-    zmq::message_t identity;
-    auto result = zmqRouter_->recv(identity);
-    ////////////////////////////////////////////////////////
-
-    zmq::message_t target;
-    (void)zmqRouter_->recv(target);
-    const string targetString(static_cast<char*>(target.data()), target.size());
-    if(targetString == "Station"){
-        // 接收一级主题
-        zmq::message_t topic;
-        (void)zmqRouter_->recv(topic);
-        const string topicString(static_cast<char*>(topic.data()), topic.size());
-        if(topicString == "PublishInfo"){
-            doPublishInfo();
-        }
-        else if(topicString == "ReadInfo"){
-            doReadInfo(identity);
-        }
-    }
-    else{
-        zmqRouter_->send(target, zmq::send_flags::sndmore);// 二级路由地址
-        while(true){
-            zmq::message_t msg;
-            (void)zmqRouter_->recv(msg);
-            const string msgstr(static_cast<char*>(msg.data()), static_cast<char*>(msg.data()) + msg.size());
-            const int isRcvmore = zmqRouter_->get(zmq::sockopt::rcvmore);
-            zmqRouter_->send(msg, isRcvmore ? zmq::send_flags::sndmore : zmq::send_flags::none);
-            if(!isRcvmore) break;
-        }
-    }
-}
-catch(const std::exception& e)
-{
-    std::cerr << e.what() << '\n';
-}
-}
-
-void Station::start()
-{
-    loopThread_ = std::thread([&]{
-    while(true){
-        doWork();
-    }});
+    dataRouter_->send(identity, zmq::send_flags::sndmore);
+    dataRouter_->send(reqmsg, zmq::send_flags::none);
 }

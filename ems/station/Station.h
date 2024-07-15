@@ -23,12 +23,15 @@ public:
     ~Station();
     void start();
 private:
-    void doWork();
+    void doData();
+    void doCommand();
     void doPublishInfo();
     void doReadInfo(zmq::message_t& identity);
 
     StationInfo stationInfo_;
-    shared_ptr<zmq::socket_t> zmqRouter_;
-    std::thread loopThread_;
+    shared_ptr<zmq::socket_t> dataRouter_;
+    shared_ptr<zmq::socket_t> cmdRouter_;
+    std::thread dataThread_;
+    std::thread cmdThread_;
 };
 }//namespace ems

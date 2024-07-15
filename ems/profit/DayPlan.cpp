@@ -10,6 +10,7 @@
 #include "utils/AuthException.h"
 #include "utils/datetime.h"
 #include "utils/jsonWrapper.h"
+#include "ems/base/Database.h"
 
 using namespace ems;
 using namespace ems::electricity_price;
@@ -18,19 +19,7 @@ void DayPlan::createTable()
 {
 try
 {
-    const string projectPath{ "/opt/paceic_ems_server/main" };
-    const string dbPath{ projectPath + "/db" };
-    BOOST_ASSERT(filesystem::is_directory(dbPath));
-
-    const string filename{ dbPath + "/ElectricityPrice.sqlite" };
-    sqlite::database ElectricityPriceDb(filename);
-
-    /**
-     * 后期优化注解：
-     *      1, 拼接列定义时，可以先使用vector将其缓存，然后再与SQL语句进行组合
-     *      2, jian_input等列实际业务数据类型应为浮点类型，当前原型开发阶段暂时统一为字符串类型
-     *      3, ...
-    */
+    auto ElectricityPriceDb = base::Database::open("/ElectricityPrice.sqlite");
     ElectricityPriceDb << "CREATE TABLE IF NOT EXISTS ELECTRICITY_PRICE_DAYPLAN("
                             "NAME TEXT, "
                             "DURATION_NAME TEXT, "
@@ -48,12 +37,12 @@ void DayPlan::insertIntoDefaultRecord()
 {
 try
 {
-    const string projectPath{ "/opt/paceic_ems_server/main" };
-    const string dbPath{ projectPath + "/db" };
-    BOOST_ASSERT(filesystem::is_directory(dbPath));
+    auto ElectricityPriceDb = base::Database::open("/ElectricityPrice.sqlite");
 
-    const string filename{ dbPath + "/ElectricityPrice.sqlite" };
-    sqlite::database ElectricityPriceDb(filename);
+    // 如果存在旧记录，则不添加新的默认记录
+    int recordCount{0};
+    ElectricityPriceDb << "SELECT COUNT(*) FROM ELECTRICITY_PRICE_DAYPLAN;" >> recordCount;
+    if(recordCount > 0) return;
 
     {
         // 谷时段定义
@@ -175,7 +164,8 @@ catch(const std::exception& e){
 }
 }
 
-void DayPlan::requestCallbackPost(const httplib::Request &req, httplib::Response &res, shared_ptr<zmq::socket_t> stationDealer)
+void DayPlan::requestCallbackPost(const httplib::Request &req, httplib::Response &res,
+                                    shared_ptr<zmq::socket_t> dataDealer, shared_ptr<zmq::socket_t> cmdDealer)
 {
 try
 {
@@ -191,12 +181,7 @@ try
     const string dayPlanName = reqbody["name"].asString();
     
     // 打开数据库
-    const string projectPath{ "/opt/paceic_ems_server/main" };
-    const string dbPath{ projectPath + "/db" };
-    BOOST_ASSERT(filesystem::is_directory(dbPath));
-
-    const string filename{ dbPath + "/ElectricityPrice.sqlite" };
-    sqlite::database ElectricityPriceDb(filename);
+    auto ElectricityPriceDb = base::Database::open("/ElectricityPrice.sqlite");
 
     // 检查记录是否已存在
     int recordCount{ 0 };
@@ -254,7 +239,8 @@ catch(const std::exception& e){
 }
 }
 
-void DayPlan::requestCallbackGet(const httplib::Request &req, httplib::Response &res, shared_ptr<zmq::socket_t> stationDealer)
+void DayPlan::requestCallbackGet(const httplib::Request &req, httplib::Response &res,
+                                    shared_ptr<zmq::socket_t> dataDealer, shared_ptr<zmq::socket_t> cmdDealer)
 {
 try
 {
@@ -262,13 +248,8 @@ try
         throw std::runtime_error("request params err");
     const string durationName = req.get_param_value("name");
 
+    auto ElectricityPriceDb = base::Database::open("/ElectricityPrice.sqlite");
     RecordList recordList;
-    const string projectPath{ "/opt/paceic_ems_server/main" };
-    const string dbPath{ projectPath + "/db" };
-    BOOST_ASSERT(filesystem::is_directory(dbPath));
-
-    const string filename{ dbPath + "/ElectricityPrice.sqlite" };
-    sqlite::database ElectricityPriceDb(filename);
 
     // 查询
     ElectricityPriceDb << "SELECT "
@@ -308,16 +289,12 @@ catch(const std::exception& e){
 }
 }
 
-void DayPlan::requestCallbackGetNameList(const httplib::Request &req, httplib::Response &res, shared_ptr<zmq::socket_t> stationDealer)
+void DayPlan::requestCallbackGetNameList(const httplib::Request &req, httplib::Response &res,
+                                    shared_ptr<zmq::socket_t> dataDealer, shared_ptr<zmq::socket_t> cmdDealer)
 {
 try
 {
-    const string projectPath{ "/opt/paceic_ems_server/main" };
-    const string dbPath{ projectPath + "/db" };
-    BOOST_ASSERT(filesystem::is_directory(dbPath));
-
-    const string filename{ dbPath + "/ElectricityPrice.sqlite" };
-    sqlite::database ElectricityPriceDb(filename);
+    auto ElectricityPriceDb = base::Database::open("/ElectricityPrice.sqlite");
 
     // 查询
     NameList namelist;
@@ -350,7 +327,8 @@ catch(const std::exception& e){
 }
 }
 
-void DayPlan::requestCallbackDelete(const httplib::Request &req, httplib::Response &res, shared_ptr<zmq::socket_t> stationDealer)
+void DayPlan::requestCallbackDelete(const httplib::Request &req, httplib::Response &res,
+                                    shared_ptr<zmq::socket_t> dataDealer, shared_ptr<zmq::socket_t> cmdDealer)
 {
 try
 {
@@ -362,12 +340,7 @@ try
         throw std::runtime_error("request params err");
     const string dayPlanName = reqbody["name"].asString();
 
-    const string projectPath{ "/opt/paceic_ems_server/main" };
-    const string dbPath{ projectPath + "/db" };
-    BOOST_ASSERT(filesystem::is_directory(dbPath));
-
-    const string filename{ dbPath + "/ElectricityPrice.sqlite" };
-    sqlite::database ElectricityPriceDb(filename);
+    auto ElectricityPriceDb = base::Database::open("/ElectricityPrice.sqlite");
 
     {
         // 检查记录是否存在
@@ -408,7 +381,8 @@ catch(const std::exception& e){
 }
 }
 
-void DayPlan::requestCallbackPut(const httplib::Request &req, httplib::Response &res, shared_ptr<zmq::socket_t> stationDealer)
+void DayPlan::requestCallbackPut(const httplib::Request &req, httplib::Response &res,
+                                    shared_ptr<zmq::socket_t> dataDealer, shared_ptr<zmq::socket_t> cmdDealer)
 {
 try
 {
@@ -424,12 +398,7 @@ try
     const string dayPlanName = reqbody["name"].asString();
 
     // 打开数据库
-    const string projectPath{ "/opt/paceic_ems_server/main" };
-    const string dbPath{ projectPath + "/db" };
-    BOOST_ASSERT(filesystem::is_directory(dbPath));
-
-    const string filename{ dbPath + "/ElectricityPrice.sqlite" };
-    sqlite::database ElectricityPriceDb(filename);
+    auto ElectricityPriceDb = base::Database::open("/ElectricityPrice.sqlite");
 
     // 检查记录是否已存在
     int recordCount{ 0 };
@@ -492,13 +461,7 @@ void DayPlan::insertRecord(const string& name,
                             const string& durationName, const string& durationType,
                             const string& durationBegin, const string& durationEnd)
 {
-    const string projectPath{ "/opt/paceic_ems_server/main" };
-    const string dbPath{ projectPath + "/db" };
-    BOOST_ASSERT(filesystem::is_directory(dbPath));
-
-    const string filename{ dbPath + "/ElectricityPrice.sqlite" };
-    sqlite::database ElectricityPriceDb(filename);
-
+    auto ElectricityPriceDb = base::Database::open("/ElectricityPrice.sqlite");
     ElectricityPriceDb << "INSERT INTO ELECTRICITY_PRICE_DAYPLAN ("
                             "NAME, "
                             "DURATION_NAME, DURATION_TYPE, "

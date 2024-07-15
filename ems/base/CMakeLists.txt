@@ -6,6 +6,7 @@ StationInfo.cpp
 HistoryWarning.cpp
 Interface.cpp
 Modbus.cpp
+Database.cpp
 )
 
 add_library(base ${base_SRCS})

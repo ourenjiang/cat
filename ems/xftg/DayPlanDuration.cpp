@@ -11,6 +11,8 @@
 #include "utils/datetime.h"
 #include "utils/jsonWrapper.h"
 #include "utils/StreamWrapper.h"
+#include "ems/base/Database.h"
+#include "ems/base/OperationRecord.h"
 
 using namespace ems;
 using namespace ems::xftg;
@@ -19,22 +21,16 @@ void DayPlanDuration::createTable()
 {
 try
 {
-    const string projectPath{ "/opt/paceic_ems_server/main" };
-    const string dbPath{ projectPath + "/db" };
-    BOOST_ASSERT(filesystem::is_directory(dbPath));
-
-    const string filename{ dbPath + "/Xftg.sqlite" };
-    sqlite::database XftgDb(filename);
-
+    auto XftgDb = base::Database::open("/Xftg.sqlite");
     XftgDb << "CREATE TABLE IF NOT EXISTS XFTG_DAYPLAN_DURATION("
-                            "NAME TEXT,"
-                            "DURATION_NAME TEXT,"
-                            "DURATION_BEGIN TEXT,"
-                            "DURATION_END TEXT,"
-                            "CONTROL_TYPE TEXT,"
-                            "TARGET_SOC TEXT, "
-                            "TARGET_POWER TEXT, "
-                            "PRIMARY KEY(NAME, DURATION_NAME))";
+            "NAME TEXT,"
+            "DURATION_NAME TEXT,"
+            "DURATION_BEGIN TEXT,"
+            "DURATION_END TEXT,"
+            "CONTROL_TYPE TEXT,"
+            "TARGET_SOC TEXT, "
+            "TARGET_POWER TEXT, "
+            "PRIMARY KEY(NAME, DURATION_NAME))";
 }
 catch(const std::exception& e){
     std::cerr << e.what() << '\n';
@@ -45,14 +41,8 @@ void DayPlanDuration::insertIntoDefaultRecord()
 {
 try
 {
-    const string projectPath{ "/opt/paceic_ems_server/main" };
-    const string dbPath{ projectPath + "/db" };
-    BOOST_ASSERT(filesystem::is_directory(dbPath));
+    auto XftgDb = base::Database::open("/Xftg.sqlite");
 
-    const string filename{ dbPath + "/Xftg.sqlite" };
-    sqlite::database XftgDb(filename);
-
-    // XftgDb << "DELETE FROM XFTG_DAYPLAN_DURATION;";// clear old records
     int recordCount{0};
     XftgDb << "SELECT COUNT(*) FROM XFTG_DAYPLAN_DURATION;" >> recordCount;
     if(recordCount > 0) return;
@@ -152,16 +142,8 @@ pair<string, vector<DayPlanDuration::Record>> DayPlanDuration::parseRecordFromRe
     return { dayPlanName, validRecords };
 }
 
-void DayPlanDuration::notifyStationReload(shared_ptr<zmq::socket_t> stationDealer)
-{
-    stationDealer->send(zmq::message_t(string("Command")), zmq::send_flags::sndmore);
-    stationDealer->send(zmq::message_t(string("Branch0")), zmq::send_flags::sndmore);
-    stationDealer->send(zmq::message_t(string("Strategy")), zmq::send_flags::sndmore);
-    stationDealer->send(zmq::message_t(string("Xftg")), zmq::send_flags::sndmore);
-    stationDealer->send(zmq::message_t(string("DayPlanDuration")), zmq::send_flags::none);
-}
-
-void DayPlanDuration::requestCallbackPost(const httplib::Request &req, httplib::Response &res, shared_ptr<zmq::socket_t> stationDealer)
+void DayPlanDuration::requestCallbackPost(const httplib::Request &req, httplib::Response &res,
+                                    shared_ptr<zmq::socket_t> dataDealer, shared_ptr<zmq::socket_t> cmdDealer)
 {
 try
 {
@@ -172,12 +154,7 @@ try
     const auto& [dayPlanName, durationList] = parseRecordFromRequestBody(reqbody);
 
     // 打开数据库
-    const string projectPath{ "/opt/paceic_ems_server/main" };
-    const string dbPath{ projectPath + "/db" };
-    BOOST_ASSERT(filesystem::is_directory(dbPath));
-
-    const string filename{ dbPath + "/Xftg.sqlite" };
-    sqlite::database XftgDb(filename);
+    auto XftgDb = base::Database::open("/Xftg.sqlite");
 
     // 检查记录是否已存在
     int recordCount{ 0 };
@@ -191,15 +168,23 @@ try
                 << dayPlanName << durationName << durationBegin << durationEnd << controlType << targetSoc << targetPower;
     }
 
-    notifyStationReload(stationDealer);// 通知站点重新加载数据
+    // 通知站点重新加载数据
+    cmdDealer->send(zmq::message_t(string("Strategy0Set")), zmq::send_flags::sndmore);
+    cmdDealer->send(zmq::message_t(string("InterfaceCmd")), zmq::send_flags::sndmore);
+    cmdDealer->send(zmq::message_t(string("DayPlanDuration")), zmq::send_flags::none);
 
-    // 保存'成功'操作记录
-    const string status = "success";
-    const string content{ "success" };
-    const string type{ "参数设置" };
-    const string timestamp = datetime::getCurrentTimestamp();
-    const string username = datetime::getCurrentTimestamp();
-    // OperationRecord::insertRecord(status, content, type, timestamp, username);
+    // 响应
+    zmq::message_t deviceBody;
+    (void)cmdDealer->recv(deviceBody);
+
+    // 解析消息
+    pair<bool, string> respondMsg;
+    const bool unpackMsgResult = msgpackWrapper::unpack(deviceBody.data(), deviceBody.size(), respondMsg);
+    BOOST_ASSERT(unpackMsgResult);
+    const auto& [returnStatus, returnContent] = respondMsg;
+    if(!returnStatus)
+        throw std::runtime_error("modbus respond failed");
+    base::OperationRecord::insertRecord("success", "添加削峰填谷日计划", "参数设置", usernameAuth);
 
     // 成功响应
     Json::Value repJson;
@@ -215,7 +200,8 @@ catch(const std::exception& e){
 }
 }
 
-void DayPlanDuration::requestCallbackGet(const httplib::Request &req, httplib::Response &res, shared_ptr<zmq::socket_t> stationDealer)
+void DayPlanDuration::requestCallbackGet(const httplib::Request &req, httplib::Response &res,
+                                    shared_ptr<zmq::socket_t> dataDealer, shared_ptr<zmq::socket_t> cmdDealer)
 {
 try
 {
@@ -251,16 +237,12 @@ catch(const std::exception& e){
 }
 }
 
-void DayPlanDuration::requestCallbackGetNameList(const httplib::Request &req, httplib::Response &res, shared_ptr<zmq::socket_t> stationDealer)
+void DayPlanDuration::requestCallbackGetNameList(const httplib::Request &req, httplib::Response &res,
+                                    shared_ptr<zmq::socket_t> dataDealer, shared_ptr<zmq::socket_t> cmdDealer)
 {
 try
 {
-    const string projectPath{ "/opt/paceic_ems_server/main" };
-    const string dbPath{ projectPath + "/db" };
-    BOOST_ASSERT(filesystem::is_directory(dbPath));
-
-    const string filename{ dbPath + "/Xftg.sqlite" };
-    sqlite::database XftgDb(filename);
+    auto XftgDb = base::Database::open("/Xftg.sqlite");
 
     // 查询
     vector<string> namelist;
@@ -294,7 +276,8 @@ catch(const std::exception& e)
 }
 }
 
-void DayPlanDuration::requestCallbackDelete(const httplib::Request &req, httplib::Response &res, shared_ptr<zmq::socket_t> stationDealer)
+void DayPlanDuration::requestCallbackDelete(const httplib::Request &req, httplib::Response &res,
+                                    shared_ptr<zmq::socket_t> dataDealer, shared_ptr<zmq::socket_t> cmdDealer)
 {
 try
 {
@@ -303,12 +286,7 @@ try
     const string dayPlanName = reqbody["name"].asString();
 
     //操作数据库
-    const string projectPath{ "/opt/paceic_ems_server/main" };
-    const string dbPath{ projectPath + "/db" };
-    BOOST_ASSERT(filesystem::is_directory(dbPath));
-
-    const string filename{ dbPath + "/Xftg.sqlite" };
-    sqlite::database XftgDb(filename);
+    auto XftgDb = base::Database::open("/Xftg.sqlite");
 
     {
         // 检查记录是否存在
@@ -330,9 +308,23 @@ try
     // 执行删除
     XftgDb << "DELETE FROM XFTG_DAYPLAN_DURATION WHERE NAME = ?;" << dayPlanName;
 
-    // 通知中心
-    // stationDealer->send(zmq::message_t(deleteSubtitle_), zmq::send_flags::sndmore);
-    // stationDealer->send(zmq::message_t(), zmq::send_flags::none);
+    // 通知站点重新加载数据
+    cmdDealer->send(zmq::message_t(string("Strategy0Set")), zmq::send_flags::sndmore);
+    cmdDealer->send(zmq::message_t(string("InterfaceCmd")), zmq::send_flags::sndmore);
+    cmdDealer->send(zmq::message_t(string("DayPlanDuration")), zmq::send_flags::none);
+
+    // 响应
+    zmq::message_t deviceBody;
+    (void)cmdDealer->recv(deviceBody);
+
+    // 解析消息
+    pair<bool, string> respondMsg;
+    const bool unpackMsgResult = msgpackWrapper::unpack(deviceBody.data(), deviceBody.size(), respondMsg);
+    BOOST_ASSERT(unpackMsgResult);
+    const auto& [returnStatus, returnContent] = respondMsg;
+    if(!returnStatus)
+        throw std::runtime_error("modbus respond failed");
+    base::OperationRecord::insertRecord("success", "删除削峰填谷日计划", "参数设置", usernameAuth);
 
     Json::Value respondContent;
     respondContent["errcode"] = 0;
@@ -347,7 +339,8 @@ catch(const std::exception& e){
 }
 }
 
-void DayPlanDuration::requestCallbackPut(const httplib::Request &req, httplib::Response &res, shared_ptr<zmq::socket_t> stationDealer)
+void DayPlanDuration::requestCallbackPut(const httplib::Request &req, httplib::Response &res,
+                                    shared_ptr<zmq::socket_t> dataDealer, shared_ptr<zmq::socket_t> cmdDealer)
 {
 try
 {
@@ -363,12 +356,7 @@ try
     const string dayPlanName = reqbody["name"].asString();
 
     // 打开数据库
-    const string projectPath{ "/opt/paceic_ems_server/main" };
-    const string dbPath{ projectPath + "/db" };
-    BOOST_ASSERT(filesystem::is_directory(dbPath));
-
-    const string filename{ dbPath + "/Xftg.sqlite" };
-    sqlite::database XftgDb(filename);
+    auto XftgDb = base::Database::open("/Xftg.sqlite");
 
     // 判断目标记录是否存在
     int recordCount{0};
@@ -412,16 +400,23 @@ try
         }
     }
 
-    // stationDealer->send(zmq::message_t(putSubtitle_), zmq::send_flags::sndmore);
-    // stationDealer->send(zmq::message_t(), zmq::send_flags::none);
+    // 通知站点重新加载数据
+    cmdDealer->send(zmq::message_t(string("Strategy0Set")), zmq::send_flags::sndmore);
+    cmdDealer->send(zmq::message_t(string("InterfaceCmd")), zmq::send_flags::sndmore);
+    cmdDealer->send(zmq::message_t(string("DayPlanDuration")), zmq::send_flags::none);
 
-    // 保存'成功'操作记录
-    const string status = "success";
-    const string content{ "success" };
-    const string type{ "参数设置" };
-    const string timestamp = datetime::getCurrentTimestamp();
-    const string username = datetime::getCurrentTimestamp();
-    // OperationRecord::insertRecord(status, content, type, timestamp, username);
+    // 响应
+    zmq::message_t deviceBody;
+    (void)cmdDealer->recv(deviceBody);
+
+    // 解析消息
+    pair<bool, string> respondMsg;
+    const bool unpackMsgResult = msgpackWrapper::unpack(deviceBody.data(), deviceBody.size(), respondMsg);
+    BOOST_ASSERT(unpackMsgResult);
+    const auto& [returnStatus, returnContent] = respondMsg;
+    if(!returnStatus)
+        throw std::runtime_error("modbus respond failed");
+    base::OperationRecord::insertRecord("success", "修改削峰填谷日计划", "参数设置", usernameAuth);
 
     // 成功响应
     Json::Value repJson;
@@ -440,12 +435,7 @@ catch(const std::exception& e)
 
 vector<DayPlanDuration::Record> DayPlanDuration::getRecord(const string& name)
 {
-    const string projectPath{ "/opt/paceic_ems_server/main" };
-    const string dbPath{ projectPath + "/db" };
-    BOOST_ASSERT(filesystem::is_directory(dbPath));
-
-    const string filename{ dbPath + "/Xftg.sqlite" };
-    sqlite::database XftgDb(filename);
+    auto XftgDb = base::Database::open("/Xftg.sqlite");
 
     // 准备查询结果
     vector<Record> records;
@@ -475,42 +465,36 @@ vector<DayPlanDuration::Record> DayPlanDuration::getRecord(const string& name)
 
 std::optional<map<string, vector<DayPlanDuration::Record>>> DayPlanDuration::getAllRecord()
 {
-    try
-    {
-        /* code */
-        const string projectPath{ "/opt/paceic_ems_server/main" };
-        const string dbPath{ projectPath + "/db" };
-        BOOST_ASSERT(filesystem::is_directory(dbPath));
+try
+{
+    auto XftgDb = base::Database::open("/Xftg.sqlite");
 
-        const string filename{ dbPath + "/Xftg.sqlite" };
-        sqlite::database XftgDb(filename);
+    // 准备查询结果
+    map<string, vector<Record>> recordsMap;
 
-        // 准备查询结果
-        map<string, vector<Record>> recordsMap;
-
-        // 查询
-        XftgDb << "SELECT "
-                "NAME, "
-                "DURATION_NAME, "
-                "DURATION_BEGIN, "
-                "DURATION_END, "
-                "CONTROL_TYPE, "
-                "TARGET_SOC, TARGET_POWER "
-                "FROM XFTG_DAYPLAN_DURATION;"
-                >> [&](string name, string durationName,
-                        string durationBegin, string durationEnd,
-                        string controlType, string targetSoc, string targetPower){
-                            
-                            vector<Record>& records = recordsMap[name];
-                            records.emplace_back(durationName, durationBegin, durationEnd,
-                                                    controlType, targetSoc, targetPower);
-                        };
-        
-        if(!recordsMap.empty())
-            return std::optional<map<string, vector<Record>>>(recordsMap);
-    }
-    catch(const std::exception& e){
-        std::cerr << e.what() << '\n';
-    }
-    return {};
+    // 查询
+    XftgDb << "SELECT "
+            "NAME, "
+            "DURATION_NAME, "
+            "DURATION_BEGIN, "
+            "DURATION_END, "
+            "CONTROL_TYPE, "
+            "TARGET_SOC, TARGET_POWER "
+            "FROM XFTG_DAYPLAN_DURATION;"
+            >> [&](string name, string durationName,
+                    string durationBegin, string durationEnd,
+                    string controlType, string targetSoc, string targetPower){
+                        
+                        vector<Record>& records = recordsMap[name];
+                        records.emplace_back(durationName, durationBegin, durationEnd,
+                                                controlType, targetSoc, targetPower);
+                    };
+    
+    if(!recordsMap.empty())
+        return std::optional<map<string, vector<Record>>>(recordsMap);
+}
+catch(const std::exception& e){
+    std::cerr << e.what() << '\n';
+}
+return {};
 }

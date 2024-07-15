@@ -8,7 +8,7 @@ using namespace ems::solar;
 
 Setting::Setting()
 {
-    registerHttpInterfaces();
+    // registerHttpInterfaces();
 }
 
 bool Setting::setStatus(const string& name, const string& status)

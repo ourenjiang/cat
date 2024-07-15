@@ -13,7 +13,8 @@ RealtimeWarning::RealtimeWarning()
 {
 }
 
-void RealtimeWarning::requestCallbackBau(const httplib::Request &req, httplib::Response &res, shared_ptr<zmq::socket_t> stationDealer)
+void RealtimeWarning::requestCallbackBau(const httplib::Request &req, httplib::Response &res,
+    shared_ptr<zmq::socket_t> dataDealer, shared_ptr<zmq::socket_t> cmdDealer)
 {
 try
 {
@@ -21,7 +22,7 @@ try
         throw std::runtime_error("request params err");
     const string branchIndex = req.get_param_value("branchIndex");
     //////////////////////////////////////////////////////////////////////////
-    auto stationInfo = base::getStationInfo(stationDealer);
+    auto stationInfo = base::getStationInfo(dataDealer);
 
     // auto& branchList = stationInfo.branchList;
     // auto branchItr = branchList.find(std::stoi(branchIndex));
@@ -88,7 +89,8 @@ catch(const std::exception& e){
 }
 }
 
-void RealtimeWarning::requestCallbackBcu(const httplib::Request &req, httplib::Response &res, shared_ptr<zmq::socket_t> stationDealer)
+void RealtimeWarning::requestCallbackBcu(const httplib::Request &req, httplib::Response &res,
+                                    shared_ptr<zmq::socket_t> dataDealer, shared_ptr<zmq::socket_t> cmdDealer)
 {
 try
 {
@@ -97,7 +99,7 @@ try
     const string branchIndex = req.get_param_value("branchIndex");
     const string bcuIndex = req.get_param_value("bcuIndex");
     ////////////////////////////////////////////////////////////////////
-    auto stationInfo = base::getStationInfo(stationDealer);
+    auto stationInfo = base::getStationInfo(dataDealer);
 
     // auto& branchList = stationInfo.branchList;
     // auto branchItr = branchList.find(std::stoi(branchIndex));

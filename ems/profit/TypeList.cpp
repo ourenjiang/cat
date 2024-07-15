@@ -52,7 +52,6 @@ void TypeList::insertIntoDefaultRecord()
 {
 try
 {
-    /* code */
     const string projectPath{ "/opt/paceic_ems_server/main" };
     const string dbPath{ projectPath + "/db" };
     BOOST_ASSERT(filesystem::is_directory(dbPath));
@@ -60,51 +59,46 @@ try
     const string filename{ dbPath + "/ElectricityPrice.sqlite" };
     sqlite::database ElectricityPriceDb(filename);
 
-    {
-        int recordCount{0};
-        ElectricityPriceDb << "SELECT COUNT(*) FROM ELECTRICITY_PRICE_TYPELIST WHERE NAME = ?;"
-                            << "typeList1" >> recordCount;
-        if(recordCount == 0){
-            ElectricityPriceDb << "INSERT INTO ELECTRICITY_PRICE_TYPELIST ("
-                                    "NAME, "
-                                    "JIAN_INPUT, JIAN_OUTPUT, "
-                                    "FENG_INPUT, FENG_OUTPUT, "
-                                    "PING_INPUT, PING_OUTPUT, "
-                                    "GU_INPUT, GU_OUTPUT) "
-                                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);"
-                                    << "typeList1"
-                                    << "1.400" << "1.400"
-                                    << "1.300" << "1.300"
-                                    << "1.200" << "1.200"
-                                    << "1.100" << "1.100";
-        }
-    }
-    {
-        int recordCount{0};
-        ElectricityPriceDb << "SELECT COUNT(*) FROM ELECTRICITY_PRICE_TYPELIST WHERE NAME = ?;"
-                            << "typeList2" >> recordCount;
-        if(recordCount == 0){
-            ElectricityPriceDb << "INSERT INTO ELECTRICITY_PRICE_TYPELIST ("
-                                    "NAME, "
-                                    "JIAN_INPUT, JIAN_OUTPUT, "
-                                    "FENG_INPUT, FENG_OUTPUT, "
-                                    "PING_INPUT, PING_OUTPUT, "
-                                    "GU_INPUT, GU_OUTPUT) "
-                                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);"
-                                << "typeList2"
-                                << "1.410" << "1.410"
-                                << "1.310" << "1.310"
-                                << "1.210" << "1.210"
-                                << "1.110" << "1.110";
-        }
-    }
+    // 如果存在旧记录，则不添加新的默认记录
+    int recordCount{0};
+    ElectricityPriceDb << "SELECT COUNT(*) FROM ELECTRICITY_PRICE_TYPELIST;" >> recordCount;
+    if(recordCount > 0) return;
+
+    // 默认记录1
+    ElectricityPriceDb << "INSERT INTO ELECTRICITY_PRICE_TYPELIST ("
+                            "NAME, "
+                            "JIAN_INPUT, JIAN_OUTPUT, "
+                            "FENG_INPUT, FENG_OUTPUT, "
+                            "PING_INPUT, PING_OUTPUT, "
+                            "GU_INPUT, GU_OUTPUT) "
+                            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);"
+                            << "typeList1"
+                            << "1.400" << "1.400"
+                            << "1.300" << "1.300"
+                            << "1.200" << "1.200"
+                            << "1.100" << "1.100";
+
+    // 默认记录2
+    ElectricityPriceDb << "INSERT INTO ELECTRICITY_PRICE_TYPELIST ("
+                            "NAME, "
+                            "JIAN_INPUT, JIAN_OUTPUT, "
+                            "FENG_INPUT, FENG_OUTPUT, "
+                            "PING_INPUT, PING_OUTPUT, "
+                            "GU_INPUT, GU_OUTPUT) "
+                            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);"
+                        << "typeList2"
+                        << "1.410" << "1.410"
+                        << "1.310" << "1.310"
+                        << "1.210" << "1.210"
+                        << "1.110" << "1.110";
 }
 catch(const std::exception& e){
     std::cerr << e.what() << '\n';
 }
 }
 
-void TypeList::requestCallbackPost(const httplib::Request &req, httplib::Response &res, shared_ptr<zmq::socket_t> stationDealer)
+void TypeList::requestCallbackPost(const httplib::Request &req, httplib::Response &res,
+                                    shared_ptr<zmq::socket_t> dataDealer, shared_ptr<zmq::socket_t> cmdDealer)
 {
 try
 {
@@ -190,7 +184,8 @@ catch(const std::exception& e){
 }
 }  
 
-void TypeList::requestCallbackGet(const httplib::Request &req, httplib::Response &res, shared_ptr<zmq::socket_t> stationDealer)
+void TypeList::requestCallbackGet(const httplib::Request &req, httplib::Response &res,
+                                    shared_ptr<zmq::socket_t> dataDealer, shared_ptr<zmq::socket_t> cmdDealer)
 {
 try
 {
@@ -254,7 +249,8 @@ catch(const std::exception& e){
 }
 }
 
-void TypeList::requestCallbackGetNameList(const httplib::Request &req, httplib::Response &res, shared_ptr<zmq::socket_t> stationDealer)
+void TypeList::requestCallbackGetNameList(const httplib::Request &req, httplib::Response &res,
+                                    shared_ptr<zmq::socket_t> dataDealer, shared_ptr<zmq::socket_t> cmdDealer)
 {
 try
 {
@@ -297,7 +293,8 @@ catch(const std::exception& e){
 }
 }
 
-void TypeList::requestCallbackDelete(const httplib::Request &req, httplib::Response &res, shared_ptr<zmq::socket_t> stationDealer)
+void TypeList::requestCallbackDelete(const httplib::Request &req, httplib::Response &res,
+                                    shared_ptr<zmq::socket_t> dataDealer, shared_ptr<zmq::socket_t> cmdDealer)
 {
 try
 {
@@ -353,7 +350,8 @@ catch(const std::exception& e){
 }
 }
 
-void TypeList::requestCallbackPut(const httplib::Request &req, httplib::Response &res, shared_ptr<zmq::socket_t> stationDealer)
+void TypeList::requestCallbackPut(const httplib::Request &req, httplib::Response &res,
+                                    shared_ptr<zmq::socket_t> dataDealer, shared_ptr<zmq::socket_t> cmdDealer)
 {
 try
 {
@@ -433,39 +431,4 @@ catch(const std::exception& e){
     respondmsg["errmsg"] = e.what();
     utils::httpRespond(res, respondmsg);
 }
-}
-
-TypeList::Record TypeList::getRecord(const string& name)
-{
-    const string projectPath{ "/opt/paceic_ems_server/main" };
-    const string dbPath{ projectPath + "/db" };
-    BOOST_ASSERT(filesystem::is_directory(dbPath));
-
-    const string filename{ dbPath + "/ElectricityPrice.sqlite" };
-    sqlite::database ElectricityPriceDb(filename);
-
-    std::optional<Record> optValue;
-    // 查询
-    ElectricityPriceDb << "SELECT "
-                            "JIAN_INPUT, JIAN_OUTPUT, "
-                            "FENG_INPUT, FENG_OUTPUT, "
-                            "PING_INPUT, PING_OUTPUT, "
-                            "GU_INPUT, GU_OUTPUT "
-                            "FROM ELECTRICITY_PRICE_TYPELIST "
-                            "WHERE NAME = ?;"
-                        << name
-    >> [&](string jianInput_, string jianOutput_,
-            string fengInput_, string fengOutput_,
-            string pingInput_, string pingOutput_,
-            string guInput_, string guOutput_){
-                
-                optValue.emplace(jianInput_, jianOutput_,
-                                fengInput_, fengOutput_,
-                                pingInput_, pingOutput_,
-                                guInput_, guOutput_
-                                );
-            };
-    if(!optValue.has_value())
-        throw std::runtime_error("record not exists");
-    return optValue.value();
 }
