@@ -175,7 +175,8 @@ catch(const std::exception& e){
 }
 }
 
-void DayPlan::requestCallbackPost(const httplib::Request &req, httplib::Response &res, shared_ptr<zmq::socket_t> stationDealer)
+void DayPlan::requestCallbackPost(const httplib::Request &req, httplib::Response &res,
+                                    shared_ptr<zmq::socket_t> dataDealer, shared_ptr<zmq::socket_t> cmdDealer)
 {
 try
 {
@@ -254,7 +255,8 @@ catch(const std::exception& e){
 }
 }
 
-void DayPlan::requestCallbackGet(const httplib::Request &req, httplib::Response &res, shared_ptr<zmq::socket_t> stationDealer)
+void DayPlan::requestCallbackGet(const httplib::Request &req, httplib::Response &res,
+                                    shared_ptr<zmq::socket_t> dataDealer, shared_ptr<zmq::socket_t> cmdDealer)
 {
 try
 {
@@ -308,7 +310,8 @@ catch(const std::exception& e){
 }
 }
 
-void DayPlan::requestCallbackGetNameList(const httplib::Request &req, httplib::Response &res, shared_ptr<zmq::socket_t> stationDealer)
+void DayPlan::requestCallbackGetNameList(const httplib::Request &req, httplib::Response &res,
+                                    shared_ptr<zmq::socket_t> dataDealer, shared_ptr<zmq::socket_t> cmdDealer)
 {
 try
 {
@@ -350,7 +353,8 @@ catch(const std::exception& e){
 }
 }
 
-void DayPlan::requestCallbackDelete(const httplib::Request &req, httplib::Response &res, shared_ptr<zmq::socket_t> stationDealer)
+void DayPlan::requestCallbackDelete(const httplib::Request &req, httplib::Response &res,
+                                    shared_ptr<zmq::socket_t> dataDealer, shared_ptr<zmq::socket_t> cmdDealer)
 {
 try
 {
@@ -408,7 +412,8 @@ catch(const std::exception& e){
 }
 }
 
-void DayPlan::requestCallbackPut(const httplib::Request &req, httplib::Response &res, shared_ptr<zmq::socket_t> stationDealer)
+void DayPlan::requestCallbackPut(const httplib::Request &req, httplib::Response &res,
+                                    shared_ptr<zmq::socket_t> dataDealer, shared_ptr<zmq::socket_t> cmdDealer)
 {
 try
 {

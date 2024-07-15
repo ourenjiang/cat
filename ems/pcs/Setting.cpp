@@ -15,7 +15,8 @@
 using namespace ems;
 using namespace ems::pcs;
 
-void Setting::requestCallback(const Request &req, Response &res, shared_ptr<zmq::socket_t> stationDealer)
+void Setting::requestCallback(const Request &req, Response &res,
+    shared_ptr<zmq::socket_t> dataDealer, shared_ptr<zmq::socket_t> cmdDealer)
 {
 try
 {
@@ -25,8 +26,8 @@ try
     const string controlType = base::UserManager::getParam(body, "type");
 
     // 请求
-    stationDealer->send(zmq::message_t(string("PCS0")), zmq::send_flags::sndmore);// devId
-    stationDealer->send(zmq::message_t(string("Interface")), zmq::send_flags::sndmore);// return id
+    cmdDealer->send(zmq::message_t(string("PCS0")), zmq::send_flags::sndmore);// devId
+    cmdDealer->send(zmq::message_t(string("Interface")), zmq::send_flags::sndmore);// return id
 
     uint16_t regAddress{}, regData{};
     if(controlType == "charge" || controlType == "discharge"){
@@ -51,11 +52,11 @@ try
     }
     else
         throw std::runtime_error("request params err");
-    stationDealer->send(createMsg(regAddress, regData), zmq::send_flags::none);
+    cmdDealer->send(createMsg(regAddress, regData), zmq::send_flags::none);
 
     // 响应
     zmq::message_t deviceBody;
-    (void)stationDealer->recv(deviceBody);
+    (void)cmdDealer->recv(deviceBody);
 
     // 解析消息
     pair<bool, vector<uint8_t>> respondMsg;

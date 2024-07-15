@@ -9,7 +9,8 @@
 
 using namespace ems;
 
-void OperationRecord::requestCallbackGet(const httplib::Request &req, httplib::Response &res, shared_ptr<zmq::socket_t> stationDealer)
+void OperationRecord::requestCallbackGet(const httplib::Request &req, httplib::Response &res,
+                                    shared_ptr<zmq::socket_t> dataDealer, shared_ptr<zmq::socket_t> cmdDealer)
 {
 try
 {
@@ -98,7 +99,8 @@ catch(const std::exception& e){
 }
 }
 
-void OperationRecord::requestCallbackGetPageInfo(const httplib::Request &req, httplib::Response &res, shared_ptr<zmq::socket_t> stationDealer)
+void OperationRecord::requestCallbackGetPageInfo(const httplib::Request &req, httplib::Response &res,
+                                    shared_ptr<zmq::socket_t> dataDealer, shared_ptr<zmq::socket_t> cmdDealer)
 {
 try
 {

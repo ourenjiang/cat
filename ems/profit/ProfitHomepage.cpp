@@ -11,11 +11,12 @@ Profit::Profit()
 {
 }
 
-void Profit::requestCallback(const httplib::Request &req, httplib::Response &res, shared_ptr<zmq::socket_t> stationDealer)
+void Profit::requestCallback(const httplib::Request &req, httplib::Response &res,
+    shared_ptr<zmq::socket_t> dataDealer, shared_ptr<zmq::socket_t> cmdDealer)
 {
 try
 {
-    auto stationInfo = base::getStationInfo(stationDealer);
+    auto stationInfo = base::getStationInfo(dataDealer);
 
     Json::Value root;
 

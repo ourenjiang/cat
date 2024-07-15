@@ -9,7 +9,8 @@
 
 using namespace ems;
 
-void HistoryWarning::requestCallbackGet(const httplib::Request &req, httplib::Response &res, shared_ptr<zmq::socket_t> stationDealer)
+void HistoryWarning::requestCallbackGet(const httplib::Request &req, httplib::Response &res,
+                                    shared_ptr<zmq::socket_t> dataDealer, shared_ptr<zmq::socket_t> cmdDealer)
 {
 try
 {
@@ -57,7 +58,8 @@ catch(const std::exception& e){
 }
 }
 
-void HistoryWarning::requestCallbackGetPageInfo(const httplib::Request &req, httplib::Response &res, shared_ptr<zmq::socket_t> stationDealer)
+void HistoryWarning::requestCallbackGetPageInfo(const httplib::Request &req, httplib::Response &res,
+                                    shared_ptr<zmq::socket_t> dataDealer, shared_ptr<zmq::socket_t> cmdDealer)
 {
 try
 {

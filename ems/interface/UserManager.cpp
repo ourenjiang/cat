@@ -66,7 +66,8 @@ void UserManager::createDefaultRecord()
     }
 }
 
-void UserManager::getCallback(const httplib::Request &req, httplib::Response &res, shared_ptr<zmq::socket_t> stationDealer)
+void UserManager::getCallback(const httplib::Request &req, httplib::Response &res,
+    shared_ptr<zmq::socket_t> dataDealer, shared_ptr<zmq::socket_t> cmdDealer)
 {
 try
 {
@@ -121,7 +122,8 @@ catch(const std::exception& e){
 }
 }
 
-void UserManager::getNameListCallback(const httplib::Request &req, httplib::Response &res, shared_ptr<zmq::socket_t> stationDealer)
+void UserManager::getNameListCallback(const httplib::Request &req, httplib::Response &res,
+    shared_ptr<zmq::socket_t> dataDealer, shared_ptr<zmq::socket_t> cmdDealer)
 {
 try
 {
@@ -153,7 +155,8 @@ catch(const std::exception& e){
 }
 }
 
-void UserManager::getAllCallback(const httplib::Request &req, httplib::Response &res, shared_ptr<zmq::socket_t> stationDealer)
+void UserManager::getAllCallback(const httplib::Request &req, httplib::Response &res,
+    shared_ptr<zmq::socket_t> dataDealer, shared_ptr<zmq::socket_t> cmdDealer)
 {
 try
 {
@@ -217,7 +220,8 @@ catch(const std::exception& e){
 }
 }
 
-void UserManager::postCallback(const httplib::Request &req, httplib::Response &res, shared_ptr<zmq::socket_t> stationDealer)
+void UserManager::postCallback(const httplib::Request &req, httplib::Response &res,
+    shared_ptr<zmq::socket_t> dataDealer, shared_ptr<zmq::socket_t> cmdDealer)
 {
 try
 {
@@ -300,7 +304,8 @@ catch(const std::exception& e){
 }
 }
 
-void UserManager::putCallback(const httplib::Request &req, httplib::Response &res, shared_ptr<zmq::socket_t> stationDealer)
+void UserManager::putCallback(const httplib::Request &req, httplib::Response &res,
+    shared_ptr<zmq::socket_t> dataDealer, shared_ptr<zmq::socket_t> cmdDealer)
 {
 try
 {
@@ -385,7 +390,8 @@ catch(const std::exception& e){
 }
 }
 
-void UserManager::deleteCallback(const httplib::Request &req, httplib::Response &res, shared_ptr<zmq::socket_t> stationDealer)
+void UserManager::deleteCallback(const httplib::Request &req, httplib::Response &res,
+    shared_ptr<zmq::socket_t> dataDealer, shared_ptr<zmq::socket_t> cmdDealer)
 {
 try
 {

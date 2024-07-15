@@ -14,8 +14,10 @@ public:
     static void insertIntoDefaultRecord();
 
     using OperationRecordInfo = tuple<string, string, string, string, string>;
-    void requestCallbackGet(const httplib::Request &req, httplib::Response &res, shared_ptr<zmq::socket_t> stationDealer);
-    void requestCallbackGetPageInfo(const httplib::Request &req, httplib::Response &res, shared_ptr<zmq::socket_t> stationDealer);
+    void requestCallbackGet(const httplib::Request &req, httplib::Response &res,
+                                    shared_ptr<zmq::socket_t> dataDealer, shared_ptr<zmq::socket_t> cmdDealer);
+    void requestCallbackGetPageInfo(const httplib::Request &req, httplib::Response &res,
+                                    shared_ptr<zmq::socket_t> dataDealer, shared_ptr<zmq::socket_t> cmdDealer);
 };
 
 }//namespace ems

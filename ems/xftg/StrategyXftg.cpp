@@ -21,11 +21,13 @@ using namespace boost;
 using namespace ems;
 using namespace ems::xftg;
 
-StrategyXftg::StrategyXftg(std::shared_ptr<zmq::socket_t> stationDealer)
+StrategyXftg::StrategyXftg(std::shared_ptr<zmq::socket_t> dataDealer, std::shared_ptr<zmq::socket_t> cmdDealer, std::shared_ptr<zmq::socket_t> setDealer)
     : log_(ems::Log4cppWrapper::getLogger(0))
-    , stationDealer_(stationDealer)
+    , dataDealer_(cmdDealer)
+    , cmdDealer_(cmdDealer)
+    , setDealer_(setDealer)
 {
-    stationDealer_->set(zmq::sockopt::rcvtimeo, 1000);
+    setDealer_->set(zmq::sockopt::rcvtimeo, 1000);
     
     loadWeekPlanInfo();
     loadDayPlanDurationInfo();
@@ -39,55 +41,34 @@ StrategyXftg::~StrategyXftg()
     }
 }
 
+void StrategyXftg::start()
+{
+    loopThread_ = std::thread([&]{
+    while(true){
+        doWork();
+    }});
+}
+
 void StrategyXftg::doWork()
 {
 try
 {
     zmq::message_t srcIdentity;
-    auto result = stationDealer_->recv(srcIdentity);
-    if(!result.has_value()){
-
-        // 请求站点更新数据
-        stationDealer_->send(zmq::message_t(string("Station")), zmq::send_flags::sndmore);
-        stationDealer_->send(zmq::message_t(string("ReadInfo")), zmq::send_flags::none);
-
-        publish();// 向上发布策略状态
-        return;
-    }
-
-    const string idString(static_cast<char*>(srcIdentity.data()), srcIdentity.size());
-    if(idString == "Station"){// 来自站点的‘采集数据’返回
-        zmq::message_t rcvmsg;
-        (void)stationDealer_->recv(rcvmsg);
-        const string msgString(static_cast<char*>(rcvmsg.data()), rcvmsg.size());
-
-        StationInfo stationInfo;
-        const bool unpackResult = msgpackWrapper::unpack(rcvmsg.data(), rcvmsg.size(), stationInfo);
-        BOOST_ASSERT(unpackResult);
-
-        // 基于最新数据进行控制
-        control(stationInfo);
-    }
-    else if(idString == "PCS0"){// 来自PCS的控制返回,不需要返回
-
-    }
-    else if(idString == "BAU0"){// 来自PCS的控制返回,不需要返回
-        zmq::message_t rcvmsg;
-        (void)stationDealer_->recv(rcvmsg);
-
-        // 解析消息
-        pair<bool, vector<uint8_t>> respondMsg;
-        const bool unpackMsgResult = msgpackWrapper::unpack(rcvmsg.data(), rcvmsg.size(), respondMsg);
-        BOOST_ASSERT(unpackMsgResult);
-        const auto& [returnStatus, returnContent] = respondMsg;
-        if(!returnStatus)
-            throw std::runtime_error("modbus respond failed");
-    }
-    else if(idString == "Interface"){
+    auto result = setDealer_->recv(srcIdentity);// 注意，这里主动向策略发消息的，只能是interface
+    if(result.has_value()){
 
         // 接收用户接口控制，需要返回
         doCommand(srcIdentity);
+        return;
     }
+
+    // 请求站点更新数据
+    StationInfo stationInfo = base::getStationInfo(dataDealer_);// 同步请求/响应
+
+    // 基于最新数据进行控制
+    control(stationInfo);// 同步请求/响应
+
+    publish();// 向上发布策略状态, 只有发送没有接收
 }
 catch(const std::exception& e)
 {
@@ -99,11 +80,6 @@ void StrategyXftg::control(const StationInfo& stationInfo)
 {
     // 执行策略计划，并获得控制命令
     doUpdateInfo(stationInfo.bauMap_.at(0), stationInfo.pcsMap_.at(0));
-
-    // 发出控制命令
-    // stationDealer_->send(zmq::message_t(string("BAU0")), zmq::send_flags::sndmore);// devId
-    // stationDealer_->send(zmq::message_t(string("Strategy0")), zmq::send_flags::sndmore);// return id
-    // stationDealer_->send(createMsg(0xd700, 0), zmq::send_flags::none);
 }
 
 zmq::message_t StrategyXftg::createMsg(const uint16_t regAddress, const uint16_t regData)
@@ -115,11 +91,10 @@ zmq::message_t StrategyXftg::createMsg(const uint16_t regAddress, const uint16_t
 void StrategyXftg::publish()
 {
     auto serializedBody = msgpackWrapper::pack(strategyInfo_);
-    stationDealer_->send(zmq::message_t(string("Station")), zmq::send_flags::sndmore);
-    stationDealer_->send(zmq::message_t(string("PublishInfo")), zmq::send_flags::sndmore);
-    stationDealer_->send(zmq::message_t(string("Strategy")), zmq::send_flags::sndmore);
-    stationDealer_->send(zmq::message_t(string("0")), zmq::send_flags::sndmore);
-    stationDealer_->send(zmq::message_t(serializedBody.data(), serializedBody.size()), zmq::send_flags::none);
+    dataDealer_->send(zmq::message_t(string("PublishInfo")), zmq::send_flags::sndmore);
+    dataDealer_->send(zmq::message_t(string("Strategy")), zmq::send_flags::sndmore);
+    dataDealer_->send(zmq::message_t(string("0")), zmq::send_flags::sndmore);
+    dataDealer_->send(zmq::message_t(serializedBody.data(), serializedBody.size()), zmq::send_flags::none);
 }
 
 void StrategyXftg::doCommand(zmq::message_t& srcIdentity)
@@ -128,7 +103,7 @@ void StrategyXftg::doCommand(zmq::message_t& srcIdentity)
     // type2 : 来自PCS的控制响应帧，不需要响应;
     // type3 : 
     zmq::message_t msg;
-    (void)stationDealer_->recv(msg);
+    (void)cmdDealer_->recv(msg);
     const string msgString(static_cast<char*>(msg.data()), msg.size());
 
     if(msgString == "AutoRun"){
@@ -141,9 +116,8 @@ void StrategyXftg::doCommand(zmq::message_t& srcIdentity)
     
     pair<bool, vector<uint8_t>> respondMsg{true, {}};
     auto serializedBody = msgpackWrapper::pack(respondMsg);
-    stationDealer_->send(zmq::message_t(), zmq::send_flags::sndmore);
-    stationDealer_->send(srcIdentity, zmq::send_flags::sndmore);
-    stationDealer_->send(zmq::message_t(serializedBody.data(), serializedBody.size()), zmq::send_flags::none);
+    cmdDealer_->send(srcIdentity, zmq::send_flags::sndmore);
+    cmdDealer_->send(zmq::message_t(serializedBody.data(), serializedBody.size()), zmq::send_flags::none);
 }
 
 
@@ -239,14 +213,6 @@ void StrategyXftg::loadDayPlanProtectInfo()
 
         protectPrarmsMap_.emplace(std::get<0>(item), info);
     }
-}
-
-void StrategyXftg::start()
-{
-    loopThread_ = std::thread([&]{
-    while(true){
-        doWork();
-    }});
 }
 
 vector<uint8_t> StrategyXftg::getFramePowerOff()
@@ -493,10 +459,9 @@ void StrategyXftg::doUpdateInfo(const bau::BauInfo& bauInfo, const pcs::PcsInfo&
     if(frameResult.has_value()){
         // 请求
         vector<uint8_t> data = frameResult.value();
-        stationDealer_->send(zmq::message_t(), zmq::send_flags::sndmore);// Topic
-        stationDealer_->send(zmq::message_t(string("PCS0")), zmq::send_flags::sndmore);// devId
-        stationDealer_->send(zmq::message_t(string("Strategy0")), zmq::send_flags::sndmore);// return id
-        stationDealer_->send(zmq::message_t(data.data(), data.size()), zmq::send_flags::none);
+        cmdDealer_->send(zmq::message_t(string("PCS0")), zmq::send_flags::sndmore);// devId
+        cmdDealer_->send(zmq::message_t(string("Strategy0")), zmq::send_flags::sndmore);// return id
+        cmdDealer_->send(zmq::message_t(data.data(), data.size()), zmq::send_flags::none);
     }
 }
 

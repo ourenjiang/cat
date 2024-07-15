@@ -3,7 +3,7 @@
 #include "utils/SyncRespond.h"
 #include "ems/pcs/Simulator.h"
 #include "ems/bau/Simulator.h"
-#include "ems/interface/InterfaceBuilder.h"
+#include "ems/interface/Interface.h"
 #include "ems/processor/Processor.h"
 #include "ems/bau/BauCollector.h"
 #include "ems/pcs/PcsCollector.h"
@@ -78,17 +78,6 @@ static void initDatabaseRecord()
     UserManager::createDefaultRecord();
 }
 
-static shared_ptr<Interface> createInterface(shared_ptr<zmq::socket_t> dealerForInterface)
-{
-    InterfaceInitParams interfaceParams{
-        .httpListenPort = 8902,
-    };
-    InterfaceBuilder builder2;
-    builder2.prebuildHttpServer(interfaceParams.httpListenPort);
-    builder2.prebuildDealerForStation(dealerForInterface);
-    return builder2.build();
-}
-
 static string getProxyAddress(const string& devName)
 {
     auto& cfgRoot = YamlcppWrapper::getRoot();
@@ -113,33 +102,49 @@ int main()
     initDatabaseRecord();
     ///////////////////////////////////////////////////
 
-    auto stationDealerForBau0 = make_shared<zmq::socket_t>(zeromq::contextSingleton(), zmq::socket_type::dealer);
-    stationDealerForBau0->set(zmq::sockopt::routing_id, "BAU0");
-    stationDealerForBau0->connect("tcp://127.0.0.1:9005");
+    auto bauDataDealer = make_shared<zmq::socket_t>(zeromq::contextSingleton(), zmq::socket_type::dealer);
+    bauDataDealer->set(zmq::sockopt::routing_id, "BAU0Data");
+    bauDataDealer->connect("tcp://127.0.0.1:9005");
+
+    auto bauCmdDealer = make_shared<zmq::socket_t>(zeromq::contextSingleton(), zmq::socket_type::dealer);
+    bauCmdDealer->set(zmq::sockopt::routing_id, "BAU0Cmd");
+    bauCmdDealer->connect("tcp://127.0.0.1:9006");
 
     const string bauProxyAddr = getProxyAddress("BAU");
     auto modubsProxy = make_shared<SyncRequest>(bauProxyAddr);
     modubsProxy->start();
-    bau::BauCollector bauCollector(stationDealerForBau0, modubsProxy);
+    bau::BauCollector bauCollector(bauDataDealer, bauCmdDealer, modubsProxy);
     bauCollector.start();
     //////////////////////////////////////////////////////////////
 
-    auto stationDealerForPcs0 = make_shared<zmq::socket_t>(zeromq::contextSingleton(), zmq::socket_type::dealer);
-    stationDealerForPcs0->set(zmq::sockopt::routing_id, "PCS0");
-    stationDealerForPcs0->connect("tcp://127.0.0.1:9005");
+    auto pcsDataDealer = make_shared<zmq::socket_t>(zeromq::contextSingleton(), zmq::socket_type::dealer);
+    pcsDataDealer->set(zmq::sockopt::routing_id, "PCS0Data");
+    pcsDataDealer->connect("tcp://127.0.0.1:9005");
+
+    auto pcsCmdDealer = make_shared<zmq::socket_t>(zeromq::contextSingleton(), zmq::socket_type::dealer);
+    pcsCmdDealer->set(zmq::sockopt::routing_id, "PCS0Cmd");
+    pcsCmdDealer->connect("tcp://127.0.0.1:9006");
 
     const string pcsProxyAddr = getProxyAddress("PCS");
     auto pcsModubsProxy = make_shared<SyncRequest>(pcsProxyAddr);
     pcsModubsProxy->start();
-    pcs::PcsCollector pcsCollector(stationDealerForPcs0, pcsModubsProxy);
+    pcs::PcsCollector pcsCollector(pcsDataDealer, pcsCmdDealer, pcsModubsProxy);
     pcsCollector.start();
     //////////////////////////////////////////////////////////////
 
-    auto stationDealerForStrategy0 = make_shared<zmq::socket_t>(zeromq::contextSingleton(), zmq::socket_type::dealer);
-    stationDealerForStrategy0->set(zmq::sockopt::routing_id, "Strategy0");
-    stationDealerForStrategy0->connect("tcp://127.0.0.1:9005");
+    auto strategyDataDealer = make_shared<zmq::socket_t>(zeromq::contextSingleton(), zmq::socket_type::dealer);
+    strategyDataDealer->set(zmq::sockopt::routing_id, "Strategy0");
+    strategyDataDealer->connect("tcp://127.0.0.1:9005");
 
-    xftg::StrategyXftg xftg(stationDealerForStrategy0);
+    auto strategyCmdDealer = make_shared<zmq::socket_t>(zeromq::contextSingleton(), zmq::socket_type::dealer);
+    strategyCmdDealer->set(zmq::sockopt::routing_id, "Strategy0");
+    strategyCmdDealer->connect("tcp://127.0.0.1:9006");
+
+    auto strategySetDealer = make_shared<zmq::socket_t>(zeromq::contextSingleton(), zmq::socket_type::dealer);
+    strategySetDealer->set(zmq::sockopt::routing_id, "Strategy0");
+    strategySetDealer->connect("tcp://127.0.0.1:9006");
+
+    xftg::StrategyXftg xftg(strategyDataDealer, strategyCmdDealer, strategySetDealer);
     xftg.start();
     //////////////////////////////////////////////////////////////
 
@@ -147,11 +152,17 @@ int main()
     station.start();
     //////////////////////////////////////////////////////////////
 
-    auto stationDealerForInterface = make_shared<zmq::socket_t>(zeromq::contextSingleton(), zmq::socket_type::dealer);
-    stationDealerForInterface->set(zmq::sockopt::routing_id, "Interface");
-    stationDealerForInterface->connect("tcp://127.0.0.1:9005");
+    auto interfaceDataDealer = make_shared<zmq::socket_t>(zeromq::contextSingleton(), zmq::socket_type::dealer);
+    interfaceDataDealer->set(zmq::sockopt::routing_id, "InterfaceData");
+    interfaceDataDealer->connect("tcp://127.0.0.1:9005");
 
-    auto interface = createInterface(stationDealerForInterface);
+    auto interfaceCmdDealer = make_shared<zmq::socket_t>(zeromq::contextSingleton(), zmq::socket_type::dealer);
+    interfaceCmdDealer->set(zmq::sockopt::routing_id, "InterfaceCmd");
+    interfaceCmdDealer->connect("tcp://127.0.0.1:9006");
+
+    auto httpServer = make_shared<HttpServer>(8902);
+
+    auto interface = make_shared<Interface>(httpServer, interfaceDataDealer, interfaceCmdDealer);
     interface->start();
     //////////////////////////////////////////////////////////////
 

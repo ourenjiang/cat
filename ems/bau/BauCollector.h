@@ -22,7 +22,7 @@ using Tem = pair<uint16_t, double>;
 class BauCollector
 {
 public:
-    BauCollector(std::shared_ptr<zmq::socket_t> stationDealer, shared_ptr<SyncRequest> modbusProxy);
+    BauCollector(std::shared_ptr<zmq::socket_t> dataDealer, std::shared_ptr<zmq::socket_t> cmdDealer, shared_ptr<SyncRequest> modbusProxy);
     ~BauCollector();
 
     void start();
@@ -61,7 +61,8 @@ private:
     bool allowDischarge(const uint32_t bauThirdProtectStatus, const uint32_t bingjiThirdProtectStatus, const uint32_t specialStatus);// 检查是否有放电能力
 
     BauInfo bauInfo_;
-    std::shared_ptr<zmq::socket_t> stationDealer_;
+    std::shared_ptr<zmq::socket_t> dataDealer_;
+    std::shared_ptr<zmq::socket_t> cmdDealer_;
     shared_ptr<SyncRequest> modbusProxy_;
     vector<int> bcuPollMap_;// BCU状态轮询地址
     vector<int>::iterator bcuPollItr_;

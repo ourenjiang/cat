@@ -12,11 +12,12 @@ StorageEnergySystem::StorageEnergySystem()
 {
 }
 
-void StorageEnergySystem::requestCallback(const httplib::Request &req, httplib::Response &res, shared_ptr<zmq::socket_t> stationDealer)
+void StorageEnergySystem::requestCallback(const httplib::Request &req, httplib::Response &res,
+    shared_ptr<zmq::socket_t> dataDealer, shared_ptr<zmq::socket_t> cmdDealer)
 {
 try
 {
-    auto stationInfo = base::getStationInfo(stationDealer);
+    auto stationInfo = base::getStationInfo(dataDealer);
     Json::Value root(Json::objectValue);
     root["trend"] = StorageEnergySystem::get_trend(stationInfo);
 

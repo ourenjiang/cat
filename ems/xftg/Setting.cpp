@@ -14,7 +14,8 @@
 using namespace ems;
 using namespace ems::xftg;
 
-void Setting::requestCallbackGet(const httplib::Request &req, httplib::Response &res, shared_ptr<zmq::socket_t> stationDealer)
+void Setting::requestCallbackGet(const httplib::Request &req, httplib::Response &res,
+                                    shared_ptr<zmq::socket_t> dataDealer, shared_ptr<zmq::socket_t> cmdDealer)
 {
 try
 {
@@ -22,7 +23,7 @@ try
         throw std::runtime_error("invalud params");
     const string branchIndex = req.get_param_value("branchIndex");
 
-    auto stationInfo = base::getStationInfo(stationDealer);
+    auto stationInfo = base::getStationInfo(cmdDealer);
     auto& strategyInfo = stationInfo.strategyMap_.at(std::stoi(branchIndex));
 
     Json::Value data;
@@ -43,7 +44,8 @@ catch(const std::exception& e){
 }
 }
 
-void Setting::requestCallbackPut(const httplib::Request &req, httplib::Response &res, shared_ptr<zmq::socket_t> stationDealer)
+void Setting::requestCallbackPut(const httplib::Request &req, httplib::Response &res,
+                                    shared_ptr<zmq::socket_t> dataDealer, shared_ptr<zmq::socket_t> cmdDealer)
 {
 try
 {
@@ -72,13 +74,12 @@ try
             << autoRunFlag << branchIndex;
 
     // 通知中心
-    stationDealer->send(zmq::message_t(), zmq::send_flags::sndmore);
-    stationDealer->send(zmq::message_t(string("Strategy0")), zmq::send_flags::sndmore);
-    stationDealer->send(zmq::message_t(string("Interface")), zmq::send_flags::sndmore);
-    stationDealer->send(zmq::message_t(string("AutoRun")), zmq::send_flags::none);
+    cmdDealer->send(zmq::message_t(string("Strategy0")), zmq::send_flags::sndmore);
+    cmdDealer->send(zmq::message_t(string("Interface")), zmq::send_flags::sndmore);
+    cmdDealer->send(zmq::message_t(string("AutoRun")), zmq::send_flags::none);
     // 响应
     zmq::message_t deviceBody;
-    (void)stationDealer->recv(deviceBody);
+    (void)cmdDealer->recv(deviceBody);
 
     // 解析消息
     pair<bool, vector<uint8_t>> respondMsg;

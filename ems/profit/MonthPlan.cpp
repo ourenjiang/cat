@@ -113,7 +113,8 @@ catch(const std::exception& e){
 }
 }
 
-void MonthPlan::requestCallbackPost(const httplib::Request &req, httplib::Response &res, shared_ptr<zmq::socket_t> stationDealer)
+void MonthPlan::requestCallbackPost(const httplib::Request &req, httplib::Response &res,
+                                    shared_ptr<zmq::socket_t> dataDealer, shared_ptr<zmq::socket_t> cmdDealer)
 {
 try
 {
@@ -201,11 +202,12 @@ catch(const std::exception& e){
 }
 }
 
-void MonthPlan::requestCallbackGet(const httplib::Request &req, httplib::Response &res, shared_ptr<zmq::socket_t> stationDealer)
+void MonthPlan::requestCallbackGet(const httplib::Request &req, httplib::Response &res,
+                                    shared_ptr<zmq::socket_t> dataDealer, shared_ptr<zmq::socket_t> cmdDealer)
 {
     // 不提供名称时，将请求转发至获取全部记录接口
     if(!req.has_param("name")){
-        requestCallbackGetAll(req, res, stationDealer);
+        requestCallbackGetAll(req, res, dataDealer, cmdDealer);
         return;
     }
 
@@ -257,7 +259,8 @@ catch(const std::exception& e){
 }
 }
 
-void MonthPlan::requestCallbackGetAll(const httplib::Request &req, httplib::Response &res, shared_ptr<zmq::socket_t> stationDealer)
+void MonthPlan::requestCallbackGetAll(const httplib::Request &req, httplib::Response &res,
+                                    shared_ptr<zmq::socket_t> dataDealer, shared_ptr<zmq::socket_t> cmdDealer)
 {
 try
 {
@@ -303,7 +306,8 @@ catch(const std::exception& e){
 }
 }
 
-void MonthPlan::requestCallbackDelete(const httplib::Request &req, httplib::Response &res, shared_ptr<zmq::socket_t> stationDealer)
+void MonthPlan::requestCallbackDelete(const httplib::Request &req, httplib::Response &res,
+                                    shared_ptr<zmq::socket_t> dataDealer, shared_ptr<zmq::socket_t> cmdDealer)
 {
 try
 {
@@ -350,7 +354,8 @@ catch(const std::exception& e){
 }
 }
 
-void MonthPlan::requestCallbackPut(const httplib::Request &req, httplib::Response &res, shared_ptr<zmq::socket_t> stationDealer)
+void MonthPlan::requestCallbackPut(const httplib::Request &req, httplib::Response &res,
+                                    shared_ptr<zmq::socket_t> dataDealer, shared_ptr<zmq::socket_t> cmdDealer)
 {
 try
 {

@@ -13,7 +13,7 @@ using namespace std;
 class PcsCollector
 {
 public:
-    PcsCollector(std::shared_ptr<zmq::socket_t> stationDealer, std::shared_ptr<SyncRequest> modbusProxy);
+    PcsCollector(std::shared_ptr<zmq::socket_t> dataDealer, std::shared_ptr<zmq::socket_t> cmdDealer, std::shared_ptr<SyncRequest> modbusProxy);
     ~PcsCollector();
 
     void start();
@@ -37,7 +37,8 @@ private:
     RunStatus calcRun(const uint16_t bits1, const uint16_t bits2, const uint16_t bits3);
 
     PcsInfo pcsInfo_;
-    std::shared_ptr<zmq::socket_t> stationDealer_;
+    std::shared_ptr<zmq::socket_t> dataDealer_;
+    std::shared_ptr<zmq::socket_t> cmdDealer_;
     std::shared_ptr<SyncRequest> modbusProxy_;
     std::thread loopThread_;
 };

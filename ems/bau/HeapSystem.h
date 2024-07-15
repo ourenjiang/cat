@@ -14,7 +14,7 @@ class HeapSystem
 {
 public:
     static void requestCallback(const httplib::Request &req, httplib::Response &res,
-                        shared_ptr<zmq::socket_t> stationDealer);
+                        shared_ptr<zmq::socket_t> dataDealer, shared_ptr<zmq::socket_t> cmdDealer);
 private:
     static string convertCellAddrFormat(const uint16_t);
     static Json::Value get_base(const BauStatusSummary&);//基础信息

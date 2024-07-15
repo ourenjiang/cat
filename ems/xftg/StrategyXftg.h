@@ -82,7 +82,7 @@ struct ExecuteParams
 class StrategyXftg
 {
 public:
-    StrategyXftg(std::shared_ptr<zmq::socket_t> stationDealer);
+    StrategyXftg(std::shared_ptr<zmq::socket_t> dataDealer, std::shared_ptr<zmq::socket_t> cmdDealer, std::shared_ptr<zmq::socket_t> setDealer);
     ~StrategyXftg();
     void start();
 private:
@@ -133,11 +133,14 @@ private:
     */
     log4cpp::Category& log_;
     StrategyInfo strategyInfo_;
+    std::shared_ptr<zmq::socket_t> dataDealer_;
+    std::shared_ptr<zmq::socket_t> cmdDealer_;
+    std::shared_ptr<zmq::socket_t> setDealer_;
+
     bau::DeviceStatus bauStatus_;
     std::map<string, std::vector<DurationInfo>> dayPlanDurationMap_;
     std::map<string, ProtectParams> protectPrarmsMap_;
     std::map<string, WeekPlanInfo> weekPlanInfoMap_;
-    std::shared_ptr<zmq::socket_t> stationDealer_;
     std::thread loopThread_;
 };
 }//namespace xftg

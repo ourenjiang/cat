@@ -9,7 +9,7 @@ using namespace ems;
 using namespace ems::bau;
 
 void CellSystem::requestCallback(const httplib::Request &req, httplib::Response &res,
-                                shared_ptr<zmq::socket_t> stationDealer)
+    shared_ptr<zmq::socket_t> dataDealer, shared_ptr<zmq::socket_t> cmdDealer)
 {
 try
 {
@@ -21,7 +21,7 @@ try
     const string bmuIndex = req.get_param_value("bmuIndex");
     ////////////////////////////////////////////////////////////////
 
-    auto stationInfo = base::getStationInfo(stationDealer);
+    auto stationInfo = base::getStationInfo(dataDealer);
     // auto& branchList = stationInfo.branchList;
     // auto branchItr = branchList.find(std::stoi(branchIndex));
     // if(branchItr == branchList.end())

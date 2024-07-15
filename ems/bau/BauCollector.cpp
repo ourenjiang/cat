@@ -11,11 +11,12 @@ using namespace std;
 using namespace ems;
 using namespace ems::bau;
 
-BauCollector::BauCollector(std::shared_ptr<zmq::socket_t> stationDealer, shared_ptr<SyncRequest> modbusProxy)
-    : stationDealer_(stationDealer)
+BauCollector::BauCollector(std::shared_ptr<zmq::socket_t> dataDealer, std::shared_ptr<zmq::socket_t> cmdDealer, shared_ptr<SyncRequest> modbusProxy)
+    : dataDealer_(cmdDealer)
+    , cmdDealer_(cmdDealer)
     , modbusProxy_(modbusProxy)
 {
-    stationDealer_->set(zmq::sockopt::rcvtimeo, 1000);
+    cmdDealer_->set(zmq::sockopt::rcvtimeo, 1000);
 }
 
 BauCollector::~BauCollector()
@@ -36,7 +37,7 @@ void BauCollector::doWork()
 try
 {
     zmq::message_t srcIdentity;
-    auto result = stationDealer_->recv(srcIdentity);
+    auto result = cmdDealer_->recv(srcIdentity);
     if(result.has_value()){
         // 接收到命令
         doCommand(srcIdentity);
@@ -54,11 +55,10 @@ try
 
     // 向上发布数据
     auto serializedBody = msgpackWrapper::pack(bauInfo_);
-    stationDealer_->send(zmq::message_t(string("Station")), zmq::send_flags::sndmore);
-    stationDealer_->send(zmq::message_t(string("PublishInfo")), zmq::send_flags::sndmore);
-    stationDealer_->send(zmq::message_t(string("BAU")), zmq::send_flags::sndmore);
-    stationDealer_->send(zmq::message_t(string("0")), zmq::send_flags::sndmore);
-    stationDealer_->send(zmq::message_t(serializedBody.data(), serializedBody.size()), zmq::send_flags::none);
+    dataDealer_->send(zmq::message_t(string("PublishInfo")), zmq::send_flags::sndmore);
+    dataDealer_->send(zmq::message_t(string("BAU")), zmq::send_flags::sndmore);
+    dataDealer_->send(zmq::message_t(string("0")), zmq::send_flags::sndmore);
+    dataDealer_->send(zmq::message_t(serializedBody.data(), serializedBody.size()), zmq::send_flags::none);
 }
 catch(const std::exception& e)
 {
@@ -571,17 +571,17 @@ void BauCollector::doCommand(zmq::message_t& srcIdentity)
 {
     const string idString(static_cast<char*>(srcIdentity.data()), srcIdentity.size());
     zmq::message_t msg;
-    (void)stationDealer_->recv(msg);
+    (void)cmdDealer_->recv(msg);
     const string msgString(static_cast<char*>(msg.data()), msg.size());
 
     vector<uint8_t> reqmsg(reinterpret_cast<const uint8_t*>(msg.data()),
                             reinterpret_cast<const uint8_t*>(msg.data()) + msg.size());
     auto repmsg = sendAndRecv(reqmsg);
     if(!repmsg.has_value()){
-        pair<bool, vector<uint8_t>> respondMsg{true, {}};
+        pair<bool, vector<uint8_t>> respondMsg{false, {}};
         auto serializedBody = msgpackWrapper::pack(respondMsg);
-        stationDealer_->send(srcIdentity, zmq::send_flags::sndmore);
-        stationDealer_->send(zmq::message_t(serializedBody.data(), serializedBody.size()), zmq::send_flags::none);
+        cmdDealer_->send(srcIdentity, zmq::send_flags::sndmore);
+        cmdDealer_->send(zmq::message_t(serializedBody.data(), serializedBody.size()), zmq::send_flags::none);
         return;
     }
     auto repFrame = repmsg.value();
@@ -589,9 +589,8 @@ void BauCollector::doCommand(zmq::message_t& srcIdentity)
                                 reinterpret_cast<const uint8_t*>(msg.data()) + msg.size());
     pair<bool, vector<uint8_t>> respondMsg{true, repFrame2};
     auto serializedBody = msgpackWrapper::pack(respondMsg);
-    stationDealer_->send(srcIdentity, zmq::send_flags::sndmore);
-    stationDealer_->send(zmq::message_t(string("BAU0")), zmq::send_flags::sndmore);
-    stationDealer_->send(zmq::message_t(serializedBody.data(), serializedBody.size()), zmq::send_flags::none);
+    cmdDealer_->send(srcIdentity, zmq::send_flags::sndmore);
+    cmdDealer_->send(zmq::message_t(serializedBody.data(), serializedBody.size()), zmq::send_flags::none);
 }
 
 BauStatusSummary BauCollector::createBauStatusSummary(const vector<uint16_t>& frameRegisters)

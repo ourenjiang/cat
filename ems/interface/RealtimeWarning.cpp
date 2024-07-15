@@ -14,11 +14,12 @@ RealtimeWarning::RealtimeWarning()
 {
 }
 
-void RealtimeWarning::requestCallbackGetWarningDeviceTree(const Request &req, Response &res, shared_ptr<zmq::socket_t> stationDealer)
+void RealtimeWarning::requestCallbackGetWarningDeviceTree(const Request &req, Response &res,
+    shared_ptr<zmq::socket_t> dataDealer, shared_ptr<zmq::socket_t> cmdDealer)
 {
 try
 {
-    auto stationInfo = base::getStationInfo(stationDealer);
+    auto stationInfo = base::getStationInfo(dataDealer);
     Json::Value root(Json::arrayValue);
 
     Json::Value branchData;

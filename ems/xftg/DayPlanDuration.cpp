@@ -161,7 +161,8 @@ void DayPlanDuration::notifyStationReload(shared_ptr<zmq::socket_t> stationDeale
     stationDealer->send(zmq::message_t(string("DayPlanDuration")), zmq::send_flags::none);
 }
 
-void DayPlanDuration::requestCallbackPost(const httplib::Request &req, httplib::Response &res, shared_ptr<zmq::socket_t> stationDealer)
+void DayPlanDuration::requestCallbackPost(const httplib::Request &req, httplib::Response &res,
+                                    shared_ptr<zmq::socket_t> dataDealer, shared_ptr<zmq::socket_t> cmdDealer)
 {
 try
 {
@@ -191,7 +192,7 @@ try
                 << dayPlanName << durationName << durationBegin << durationEnd << controlType << targetSoc << targetPower;
     }
 
-    notifyStationReload(stationDealer);// 通知站点重新加载数据
+    notifyStationReload(cmdDealer);// 通知站点重新加载数据
 
     // 保存'成功'操作记录
     const string status = "success";
@@ -215,7 +216,8 @@ catch(const std::exception& e){
 }
 }
 
-void DayPlanDuration::requestCallbackGet(const httplib::Request &req, httplib::Response &res, shared_ptr<zmq::socket_t> stationDealer)
+void DayPlanDuration::requestCallbackGet(const httplib::Request &req, httplib::Response &res,
+                                    shared_ptr<zmq::socket_t> dataDealer, shared_ptr<zmq::socket_t> cmdDealer)
 {
 try
 {
@@ -251,7 +253,8 @@ catch(const std::exception& e){
 }
 }
 
-void DayPlanDuration::requestCallbackGetNameList(const httplib::Request &req, httplib::Response &res, shared_ptr<zmq::socket_t> stationDealer)
+void DayPlanDuration::requestCallbackGetNameList(const httplib::Request &req, httplib::Response &res,
+                                    shared_ptr<zmq::socket_t> dataDealer, shared_ptr<zmq::socket_t> cmdDealer)
 {
 try
 {
@@ -294,7 +297,8 @@ catch(const std::exception& e)
 }
 }
 
-void DayPlanDuration::requestCallbackDelete(const httplib::Request &req, httplib::Response &res, shared_ptr<zmq::socket_t> stationDealer)
+void DayPlanDuration::requestCallbackDelete(const httplib::Request &req, httplib::Response &res,
+                                    shared_ptr<zmq::socket_t> dataDealer, shared_ptr<zmq::socket_t> cmdDealer)
 {
 try
 {
@@ -347,7 +351,8 @@ catch(const std::exception& e){
 }
 }
 
-void DayPlanDuration::requestCallbackPut(const httplib::Request &req, httplib::Response &res, shared_ptr<zmq::socket_t> stationDealer)
+void DayPlanDuration::requestCallbackPut(const httplib::Request &req, httplib::Response &res,
+                                    shared_ptr<zmq::socket_t> dataDealer, shared_ptr<zmq::socket_t> cmdDealer)
 {
 try
 {

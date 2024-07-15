@@ -18,7 +18,7 @@ Setting::Setting()
 }
 
 void Setting::requestCallbackPowerOff(const httplib::Request &req, httplib::Response &res,
-                                        shared_ptr<zmq::socket_t> stationDealer)
+    shared_ptr<zmq::socket_t> dataDealer, shared_ptr<zmq::socket_t> cmdDealer)
 {
 try
 {
@@ -27,12 +27,12 @@ try
     const string branchIndex = base::UserManager::getParam(body, "branchIndex");
 
     // 请求
-    stationDealer->send(zmq::message_t(string("BAU0")), zmq::send_flags::sndmore);// devId
-    stationDealer->send(zmq::message_t(string("Interface")), zmq::send_flags::sndmore);// return id
-    stationDealer->send(createMsg(0xd700, 0), zmq::send_flags::none);
+    cmdDealer->send(zmq::message_t(string("BAU0")), zmq::send_flags::sndmore);// target id
+    cmdDealer->send(zmq::message_t(string("Interface")), zmq::send_flags::sndmore);// return id
+    cmdDealer->send(createMsg(0xd700, 0), zmq::send_flags::none);
     // 响应
     zmq::message_t deviceBody;
-    (void)stationDealer->recv(deviceBody);
+    (void)cmdDealer->recv(deviceBody);
 
     // 解析消息
     pair<bool, vector<uint8_t>> respondMsg;
@@ -50,7 +50,8 @@ catch(const std::exception& e){
 }
 }
 
-void Setting::requestCallbackQuickStartup(const httplib::Request &req, httplib::Response &res, shared_ptr<zmq::socket_t> stationDealer)
+void Setting::requestCallbackQuickStartup(const httplib::Request &req, httplib::Response &res,
+    shared_ptr<zmq::socket_t> dataDealer, shared_ptr<zmq::socket_t> cmdDealer)
 {
 try
 {
@@ -59,13 +60,12 @@ try
     const string branchIndex = base::UserManager::getParam(body, "branchIndex");
 
     // 请求
-    stationDealer->send(zmq::message_t(), zmq::send_flags::sndmore);// Topic
-    stationDealer->send(zmq::message_t(string("BAU0")), zmq::send_flags::sndmore);// devId
-    stationDealer->send(zmq::message_t(string("Interface")), zmq::send_flags::sndmore);// return id
-    stationDealer->send(createMsg(0xd701, 0), zmq::send_flags::none);
+    cmdDealer->send(zmq::message_t(string("BAU0")), zmq::send_flags::sndmore);// devId
+    cmdDealer->send(zmq::message_t(string("Interface")), zmq::send_flags::sndmore);// return id
+    cmdDealer->send(createMsg(0xd701, 0), zmq::send_flags::none);
     // 响应
     zmq::message_t deviceBody;
-    (void)stationDealer->recv(deviceBody);
+    (void)cmdDealer->recv(deviceBody);
 
     // 解析消息
     pair<bool, vector<uint8_t>> respondMsg;
@@ -83,7 +83,8 @@ catch(const std::exception& e){
 }
 }
 
-void Setting::requestCallbackSetBcuRelay(const httplib::Request &req, httplib::Response &res, shared_ptr<zmq::socket_t> stationDealer)
+void Setting::requestCallbackSetBcuRelay(const httplib::Request &req, httplib::Response &res,
+    shared_ptr<zmq::socket_t> dataDealer, shared_ptr<zmq::socket_t> cmdDealer)
 {
 try
 {
@@ -99,8 +100,8 @@ try
         throw std::runtime_error("request params err");
     
     // 请求
-    stationDealer->send(zmq::message_t(string("BAU0")), zmq::send_flags::sndmore);// devId
-    stationDealer->send(zmq::message_t(string("Interface")), zmq::send_flags::sndmore);// return id
+    cmdDealer->send(zmq::message_t(string("BAU0")), zmq::send_flags::sndmore);// devId
+    cmdDealer->send(zmq::message_t(string("Interface")), zmq::send_flags::sndmore);// return id
     
     // 准备Modbus请求帧:
     // 0xd701  一键并机   固定0
@@ -113,12 +114,12 @@ try
         uint16_t value = static_cast<uint16_t>(std::stoi(bcuIndexStr));
         regData = value + 1;// 下标 + 1
     }
-    stationDealer->send(createMsg(regAddress, regData), zmq::send_flags::none);
+    cmdDealer->send(createMsg(regAddress, regData), zmq::send_flags::none);
     // 响应
     zmq::message_t srcIdentity;
     zmq::message_t deviceBody;
-    (void)stationDealer->recv(srcIdentity);
-    (void)stationDealer->recv(deviceBody);
+    (void)cmdDealer->recv(srcIdentity);
+    (void)cmdDealer->recv(deviceBody);
 
     // 解析消息
     pair<bool, vector<uint8_t>> respondMsg;
