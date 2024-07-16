@@ -5,7 +5,6 @@ Description=Paceic-EMS-Station
 Type=simple
 User=root
 Group=root
-# EnvironmentFile=/opt/paceic_ems_server/main/environment_file
 ExecStart=/opt/paceic_ems_server/main/bin/station_main
 Restart=always
 RestartSec=3
