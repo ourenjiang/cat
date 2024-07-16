@@ -12,7 +12,8 @@ using namespace ems;
 using namespace ems::bau;
 
 BauCollector::BauCollector(std::shared_ptr<zmq::socket_t> dataDealer, std::shared_ptr<zmq::socket_t> cmdDealer, shared_ptr<SyncRequest> modbusProxy)
-    : dataDealer_(dataDealer)
+    : log_(ems::Log4cppWrapper::getLogger(0))
+    , dataDealer_(dataDealer)
     , cmdDealer_(cmdDealer)
     , modbusProxy_(modbusProxy)
 {
@@ -59,6 +60,7 @@ try
     dataDealer_->send(zmq::message_t(string("BAU")), zmq::send_flags::sndmore);
     dataDealer_->send(zmq::message_t(string("0")), zmq::send_flags::sndmore);
     dataDealer_->send(zmq::message_t(serializedBody.data(), serializedBody.size()), zmq::send_flags::none);
+    log_.debugStream() << "normal loop";
 }
 catch(const std::exception& e)
 {
@@ -70,14 +72,6 @@ optional<vector<byte>> BauCollector::sendAndRecv(const vector<uint8_t>& msg)
 {
     auto msgptr = reinterpret_cast<const byte*>(msg.data());
     vector<byte> data(msgptr, msgptr + msg.size());
-    const string msgStr(reinterpret_cast<const char*>(msg.data()), msg.size());
-    if(msgStr == "BAU"){
-        cout << "action" << endl;
-    }
-    else if(msgStr == "BAU__"){
-        cout << "action" << endl;
-    }
-    
     const int64_t sndTimeoutMs{ 1000 };
     const int64_t rcvTimeoutMs{ 1000 };
     modbusProxy_->syncWrite(data, sndTimeoutMs);

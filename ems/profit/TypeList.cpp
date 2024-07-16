@@ -385,7 +385,6 @@ try
     sqlite::database ElectricityPriceDb(filename);
 
     // 操作数据库
-    bool existRecord{ false };
     ElectricityPriceDb << "UPDATE ELECTRICITY_PRICE_TYPELIST SET "
                             "JIAN_INPUT = ?, JIAN_OUTPUT = ?, "
                             "FENG_INPUT = ?, FENG_OUTPUT = ?, "

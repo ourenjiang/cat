@@ -6,11 +6,6 @@
 
 using namespace ems;
 
-Profit::Profit()
-    : log_(ems::Log4cppWrapper::getLogger(5))
-{
-}
-
 void Profit::requestCallback(const httplib::Request &req, httplib::Response &res,
     shared_ptr<zmq::socket_t> dataDealer, shared_ptr<zmq::socket_t> cmdDealer)
 {

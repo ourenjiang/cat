@@ -12,11 +12,6 @@
 
 using namespace ems;
 
-UserManager::UserManager()
-    : log_(ems::Log4cppWrapper::getLogger(5))
-{
-}
-
 void UserManager::createTable()
 {
     auto UserDb = base::Database::open("/Users.sqlite");

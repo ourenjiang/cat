@@ -12,14 +12,9 @@ global:
 ## [ERROR, WARN, INFO, DEBUG]
 logger:
 [
-    { name: MQServer, priority: DEBUG },
-    { name: ProxyBau, priority: DEBUG },
-    { name: ProxyPcs, priority: DEBUG },
-    { name: CollectorBau, priority: DEBUG },
-    { name: CollectorPcs, priority: DEBUG },
-    { name: Interface, priority: DEBUG },
+    { name: BauCollector, priority: DEBUG },
+    { name: PcsCollector, priority: DEBUG },
     { name: Xftg, priority: DEBUG },
-    { name: Station, priority: DEBUG }
 ]
 
 ## 从站通讯地址

@@ -12,7 +12,6 @@ using namespace httplib;
 class UserManager
 {
 public:
-    UserManager();
     static void createTable();
     static void insertIntoDefaultRecord();
 
@@ -29,6 +28,5 @@ public:
     void deleteCallback(const Request&, Response&,
         shared_ptr<zmq::socket_t> dataDealer, shared_ptr<zmq::socket_t> cmdDealer);
 private:
-    log4cpp::Category& log_;
 };
 }//namespace ems

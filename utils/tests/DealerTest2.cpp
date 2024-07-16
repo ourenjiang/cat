@@ -117,15 +117,15 @@ int main()
     while(true){
 
         zmq::message_t identity;
-        auto recvIdentityResult = sock_.recv(identity);
+        (void)sock_.recv(identity);
         assert(sock_.get(zmq::sockopt::rcvmore));
 
         zmq::message_t delimiter;
-        auto recvDelimiterResult = sock_.recv(delimiter);
+        (void)sock_.recv(delimiter);
         assert(sock_.get(zmq::sockopt::rcvmore));
         
         zmq::message_t content;
-        auto recvContentResult = sock_.recv(content);
+        (void)sock_.recv(content);
         assert(!sock_.get(zmq::sockopt::rcvmore));
         ////////////////////////////////////////////////////
 

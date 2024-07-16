@@ -7,11 +7,6 @@
 
 using namespace ems;
 
-MainWiringDiagram::MainWiringDiagram()
-    : log_(ems::Log4cppWrapper::getLogger(5))
-{
-}
-
 void MainWiringDiagram::requestCallback(const httplib::Request &req, httplib::Response &res,
     shared_ptr<zmq::socket_t> dataDealer, shared_ptr<zmq::socket_t> cmdDealer)
 {
@@ -105,7 +100,6 @@ Json::Value MainWiringDiagram::get_mode(const StationInfo& stationInfo)
     Json::Value content;
     content["run"] = "并网";// 实际从PCS或STS设备获取，暂时没有数据;
     {
-        auto& strategyMode = content["strategy"];
         auto& strategyInfo = stationInfo.strategyMap_.at(0);
         content["strategy"] = strategyInfo.autoRun ? strategyInfo.activeStrategy : "手动";
     }

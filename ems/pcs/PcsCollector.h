@@ -2,6 +2,7 @@
 #include "Model.h"
 #include "zmq.hpp"
 #include "utils/SyncRequest.h"
+#include "utils/Log4cppWrapper.h"
 #include <bitset>
 
 namespace ems
@@ -36,6 +37,7 @@ private:
     int calcFaultCount(const FaultStatus status);
     RunStatus calcRun(const uint16_t bits1, const uint16_t bits2, const uint16_t bits3);
 
+    log4cpp::Category& log_;
     PcsInfo pcsInfo_;
     std::shared_ptr<zmq::socket_t> dataDealer_;
     std::shared_ptr<zmq::socket_t> cmdDealer_;

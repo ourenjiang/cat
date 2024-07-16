@@ -22,7 +22,7 @@ using namespace ems;
 using namespace ems::xftg;
 
 StrategyXftg::StrategyXftg(std::shared_ptr<zmq::socket_t> dataDealer, std::shared_ptr<zmq::socket_t> cmdDealer, std::shared_ptr<zmq::socket_t> setDealer)
-    : log_(ems::Log4cppWrapper::getLogger(0))
+    : log_(ems::Log4cppWrapper::getLogger(2))
     , dataDealer_(dataDealer)
     , cmdDealer_(cmdDealer)
     , setDealer_(setDealer)
@@ -75,6 +75,7 @@ try
     dataDealer_->send(zmq::message_t(string("Strategy")), zmq::send_flags::sndmore);
     dataDealer_->send(zmq::message_t(string("0")), zmq::send_flags::sndmore);
     dataDealer_->send(zmq::message_t(serializedBody.data(), serializedBody.size()), zmq::send_flags::none);
+    log_.debugStream() << "normal loop";
 }
 catch(const std::exception& e)
 {
@@ -317,8 +318,6 @@ vector<uint8_t> StrategyXftg::getFramePowerOn()
 
 vector<uint8_t> StrategyXftg::getFrameChangeActivePower(const string& status, const double power)
 {
-    // saveNewPowerHistory(userCheckedAction.activePower);
-    // log_.debugStream() << "|======================================================2";
     BOOST_ASSERT(power >= 0 && power <= 50.0);
     BOOST_ASSERT(status == "charge" || status == "discharge");
 
@@ -542,15 +541,6 @@ std::optional<vector<uint8_t>> StrategyXftg::getRespondCmd(const BauParams& bauP
     if(pcsParams.pcsCurrentStatus.standby)
         return getActionWhenStandby(bauParams, pcsParams, userParams);
     return {};
-}
-
-void StrategyXftg::saveNewPowerHistory(const double newPower)
-{
-    const string key{ "ems:strategy:xftg:output_power" };
-    const long historyMaxSize{ 3600 * 10 };// 10h
-    const string nowTimeStr = datetime::getCurrentTimestamp();
-    ostringstream oss;
-    oss << fixed << setprecision(1) << newPower;//格式化保留1位小数
 }
 
 vector<uint8_t> StrategyXftg::verifyChargeWithBatterySuggestPowerDown(const double pcsCurrentSettingPower)
@@ -811,10 +801,6 @@ DurationInfo StrategyXftg::getCurrentDurationInDayPlan(const string& name)
     stringstream ss;
     ss << std::put_time(tmPtr, "%H:%M");
     const string currentTimeString{ ss.str() };
-
-    for(const auto& item : dayPlanDurationMap_[name]){
-
-    }
 
     const auto & dayPlanDuration = dayPlanDurationMap_[name];
     auto findResult = std::find_if(dayPlanDuration.begin(), dayPlanDuration.end(),

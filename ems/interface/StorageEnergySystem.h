@@ -11,7 +11,6 @@ using namespace std;
 class StorageEnergySystem
 {
 public:
-    StorageEnergySystem();
     void requestCallback(const httplib::Request &req, httplib::Response &res,
                         shared_ptr<zmq::socket_t> dataDealer, shared_ptr<zmq::socket_t> cmdDealer);
 private:
@@ -37,7 +36,5 @@ private:
     static Json::Value get_warning(const bau::BauInfo& bauInfo, const pcs::PcsInfo& pcsInfo);
     // 1.5 系统极值
     static Json::Value get_peak(const bau::BauStatusSummary& bauStatusSummary);
-
-    log4cpp::Category& log_;
 };
 }//namespace interface_storage_energy_system

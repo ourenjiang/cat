@@ -30,7 +30,7 @@ try
 
         Json::Value bcuData;
         bcuData["bcuNo"] = bcu.first;
-        auto& bcuInfo = bcu.second;
+        [[maybe_unused]]auto& bcuInfo = bcu.second;
         // bcuData["status"] = bcuInfo.onlineFlag ? "online" : "offline";
         bcuData["status"] = "offline";
         branchData["bau"]["bcu"].append(bcuData);

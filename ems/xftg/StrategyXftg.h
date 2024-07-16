@@ -152,9 +152,6 @@ private:
     DurationInfo getCurrentDurationInDayPlan(const string& name);
     ProtectParams getCurrentProtectParamsInWeekPlan(const string& name);
 
-    // double getAdjustedPowerForSmoothOutput(const double rawPower, const double currentPower);
-    void saveNewPowerHistory(const double newPower);
-
     // 充电状态校验
     vector<uint8_t> verifyChargeWithBatterySuggestPowerDown(const double pcsCurrentSettingPower);
     vector<uint8_t> verifyChargeWithBatterySuggestPowerStable(const string& userSuggestStatus, const double userSuggestPower, const double pcsCurrentSettingPower, const int userSuggentSoc, const int batteryCurrentSoc);

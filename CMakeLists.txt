@@ -18,6 +18,7 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 # 编译器参数
 add_compile_options(-Wfatal-errors)    # 减少模板代码错误导致的错误信息冗杂的问题
+add_compile_options(-Wunused)
 
 #安装路径
 set(CMAKE_INSTALL_PREFIX ${CMAKE_BINARY_DIR}/install)

@@ -11,7 +11,6 @@ using namespace std;
 class MainWiringDiagram
 {
 public:
-    MainWiringDiagram();
     void requestCallback(const httplib::Request &req, httplib::Response &res,
         shared_ptr<zmq::socket_t> dataDealer, shared_ptr<zmq::socket_t> cmdDealer);
 private:
@@ -29,7 +28,5 @@ private:
     Json::Value get_bms(const bau::BauInfo& bauInfo);//BMS信息
     Json::Value get_warning(const bau::BauInfo& bauInfo, const pcs::PcsInfo& pcsInfo);//告警统计
     Json::Value get_peak(const bau::BauStatusSummary& bauStatusSummary);//系统极值
-
-    log4cpp::Category& log_;
 };
 }//namespace ems

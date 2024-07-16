@@ -9,6 +9,7 @@ BAU采集器：
 #include "Model.h"
 #include "zmq.hpp"
 #include "utils/SyncRequest.h"
+#include "utils/Log4cppWrapper.h"
 #include <thread>
 
 namespace ems
@@ -60,6 +61,7 @@ private:
     bool allowCharge(const uint32_t bauThirdProtectStatus, const uint32_t bingjiThirdProtectStatus, const uint32_t specialStatus);// 检查是否有充电能力
     bool allowDischarge(const uint32_t bauThirdProtectStatus, const uint32_t bingjiThirdProtectStatus, const uint32_t specialStatus);// 检查是否有放电能力
 
+    log4cpp::Category& log_;
     BauInfo bauInfo_;
     std::shared_ptr<zmq::socket_t> dataDealer_;
     std::shared_ptr<zmq::socket_t> cmdDealer_;

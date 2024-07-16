@@ -13,7 +13,8 @@ using namespace boost;
 using namespace ems::pcs;
 
 PcsCollector::PcsCollector(std::shared_ptr<zmq::socket_t> dataDealer, std::shared_ptr<zmq::socket_t> cmdDealer, std::shared_ptr<SyncRequest> modbusProxy)
-    : dataDealer_(dataDealer)
+    : log_(ems::Log4cppWrapper::getLogger(1))
+    , dataDealer_(dataDealer)
     , cmdDealer_(cmdDealer)
     , modbusProxy_(modbusProxy)
 {
@@ -55,6 +56,7 @@ try
     dataDealer_->send(zmq::message_t(string("PCS")), zmq::send_flags::sndmore);
     dataDealer_->send(zmq::message_t(string("0")), zmq::send_flags::sndmore);
     dataDealer_->send(zmq::message_t(serializedBody.data(), serializedBody.size()), zmq::send_flags::none);
+    log_.debugStream() << "normal loop";
 }
 catch(const std::exception& e)
 {
@@ -204,7 +206,6 @@ std::optional<vector<byte>> PcsCollector::sendAndRecv(const vector<uint8_t>& msg
 void PcsCollector::handlePcsFrame()
 {
     auto& frame_0406_0460_summary = pcsInfo_.frame_0406_0460_summary;
-    auto& frame_0474_04D0_summary = pcsInfo_.frame_0474_04D0_summary;
     pcsInfo_.warningStatus = calcWarning(frame_0406_0460_summary.warnStatus1, frame_0406_0460_summary.warnStatus2);
     pcsInfo_.faultStatus = calcFault(frame_0406_0460_summary.warnStatus1, frame_0406_0460_summary.warnStatus2);
     pcsInfo_.runStatus = calcRun(frame_0406_0460_summary.warnStatus3, frame_0406_0460_summary.switchStatus, frame_0406_0460_summary.pcsStatus);

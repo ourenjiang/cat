@@ -42,7 +42,7 @@ try
 {
     // 接收ID
     zmq::message_t identity;
-    auto result = dataRouter_->recv(identity);
+    (void)dataRouter_->recv(identity);
     ////////////////////////////////////////////////////////
 
     // 接收一级主题
@@ -68,7 +68,7 @@ try
 {
     // 接收ID
     zmq::message_t identity;
-    auto result = cmdRouter_->recv(identity);
+    (void)cmdRouter_->recv(identity);
     ////////////////////////////////////////////////////////
 
     /**
