@@ -4,16 +4,12 @@ Log4cppWrapper.cpp
 YamlcppWrapper.cpp
 CommandlineParams.cpp
 EnvironmentVariables.cpp
-ZmqPublish.cpp
-ZmqSubscribe.cpp
-ZmqNode.cpp
 zeromq.cpp
 Miscellaneous.cpp
 HttpWrapper.cpp
 cpphttplib_splitout/httplib.cc
 SyncRequest.cpp
 SyncRespond.cpp
-# SyncRespond2.cpp
 BoostTimer.cpp
 crc16.cpp
 datetime.cpp

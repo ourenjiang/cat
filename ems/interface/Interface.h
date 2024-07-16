@@ -2,7 +2,6 @@
  * 代理所有的用户请求。
 */
 #pragma once
-#include "utils/ZmqNode.h"
 #include <thread>
 #include "HttpServer.h"
 

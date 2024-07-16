@@ -38,12 +38,6 @@ PRIVATE cat_utils
 )
 
 ####################################################
-add_executable(zmqNodeTest ZmqNodeTest.cpp)
-target_link_libraries(zmqNodeTest
-PRIVATE cat_utils
-)
-
-####################################################
 add_executable(syncRespondTest SyncRespondTest.cpp)
 target_link_libraries(syncRespondTest
 PRIVATE cat_utils

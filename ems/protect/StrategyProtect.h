@@ -3,9 +3,9 @@
 #include <memory>
 #include "utils/Log4cppWrapper.h"
 #include "msgpack.hpp"
-#include "utils/ZmqNode.h"
 #include "ems/bau/DeviceStatus.h"
 #include "ems/station/Model.h"
+#include "zmq.hpp"
 
 /**
  * BAU状态 & 并机状态
